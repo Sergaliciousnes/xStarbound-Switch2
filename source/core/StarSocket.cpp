@@ -45,7 +45,7 @@ Maybe<SocketPollResult> Socket::poll(SocketPollQuery const& query, unsigned time
   }
   timeval time;
   time.tv_usec = (timeout % 1000) * 1000;
-  time.tv_sec = timeout - timeout % 1000;
+  time.tv_sec = timeout / 1000;
   ret = ::select(0, &readfs, &writefs, &exceptfs, &time);
 
   if (ret < 0)
@@ -152,7 +152,7 @@ void Socket::setTimeout(unsigned timeout) {
   size = sizeof(timeout);
 #else
   struct timeval tv;
-  tv.tv_sec = timeout - timeout % 1000;
+  tv.tv_sec = timeout / 1000;
   tv.tv_usec = (timeout % 1000) * 1000;
   val = &tv;
   size = sizeof(tv);

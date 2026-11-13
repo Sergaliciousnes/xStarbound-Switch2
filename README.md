@@ -9,7 +9,7 @@ This is Sergalicious's unofficial native Horizon port of [xStarbound](https://gi
 - **Build from source:** [Switch 2 build instructions](doc/switch2-build.md).
 - **Detailed controls:** [controller mapping](doc/switch2-controls.md).
 
-The initial release uses 1920×1080 output, the ownership-routed rpmalloc backend, asset/cache improvements and cached Lua bootstrap bytecode executed separately in each VM. Heavy profiling is disabled in the shared build; the FPS overlay remains available. Local gameplay, mod loading, saving and longer sessions have been tested by the port maintainer. Mod-specific performance and compatibility can vary; desktop features and multiplayer have not all been validated on Horizon.
+The initial release uses 1920×1080 output, the ownership-routed rpmalloc backend, asset/cache improvements and cached Lua bootstrap bytecode executed separately in each VM. Heavy profiling is disabled in the shared build; the FPS overlay remains available. Local gameplay, mod loading, saving and longer sessions have been tested by the port maintainer. Mod-specific performance and compatibility can vary; multiplayer has been tested against xServer 4.7.0.2, including planet and outpost travel. Other desktop features have not all been validated on Horizon.
 
 Use a Nintendo Switch 2 with a runtime compatible with **ounce-sdk 20261113 / kaiHEN 0.0.4**, in full-memory title/application mode. This is not a Switch 1 or Linux executable. The SDK and homebrew runtime are separate prerequisites, not bundled with this source tree.
 

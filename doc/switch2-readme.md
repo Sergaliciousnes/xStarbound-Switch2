@@ -1,4 +1,4 @@
-# xStarbound for Nintendo Switch 2 — Initial Release
+# xStarbound for Nintendo Switch 2 — Multiplayer Fix
 
 ## REQUIRED FIRST: copy packed.pak from your own Steam installation
 
@@ -59,6 +59,10 @@ The right stick uses a 12% circular deadzone and a gradual response near the cen
 Use the cursor with ZR or a quick touch tap to operate menus and inventory buttons. A tap must be released within roughly half a second; swiping or holding the screen moves the cursor without clicking.
 
 For chat, press **Minus**, enter a message or command, and choose **Done** to send it. Cancel or an empty entry sends nothing. The chat closes afterward. The chat shortcut is available during gameplay. Rebinding the corresponding keyboard actions also changes what these controller mappings do.
+
+## Multiplayer
+
+Multiplayer has been tested with **xServer 4.7.0.2**, including travel to a planet and the outpost. Use a matching server version and compatible mod files.
 
 ## Prerequisites and launch
 

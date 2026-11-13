@@ -5,9 +5,15 @@
 namespace Star {
 
 TcpSocketPtr TcpSocket::connectTo(HostAddressWithPort const& addressWithPort, unsigned timeout) {
+#ifdef STAR_SYSTEM_SWITCH2
+  Logger::info("Network: TCP connection attempt to {} (timeout {} ms)", addressWithPort, timeout);
+#endif
   auto socket = TcpSocketPtr(new TcpSocket(addressWithPort.address().mode()));
   socket->setTimeout(timeout);
   socket->connect(addressWithPort);
+#ifdef STAR_SYSTEM_SWITCH2
+  Logger::info("Network: TCP connected to {}", addressWithPort);
+#endif
   return socket;
 }
 

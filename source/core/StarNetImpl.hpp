@@ -20,6 +20,9 @@
 #endif
 
 #include "StarHostAddress.hpp"
+#ifdef STAR_SYSTEM_SWITCH2
+#include <switch.h>
+#endif
 
 #ifndef AI_ADDRCONFIG
 #define AI_ADDRCONFIG 0
@@ -58,7 +61,13 @@ inline String netErrorString() {
 
   return result;
 #else
+#ifdef STAR_SYSTEM_SWITCH2
+  int error = errno;
+  auto nativeResult = socketGetLastResult();
+  return strf("{} - {} (Horizon BSD Result 0x{:08x})", error, error ? strerror(error) : "no errno reported", nativeResult);
+#else
   return strf("{} - {}", errno, strerror(errno));
+#endif
 #endif
 }
 
