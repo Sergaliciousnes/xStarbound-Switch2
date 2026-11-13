@@ -14,7 +14,7 @@ add_subdirectory(platform)
 # Core game logic used by both server and client.
 add_subdirectory(game)
 
-if(NOT QT_GUIS_ONLY)
+if(NOT QT_GUIS_ONLY AND NOT STAR_SYSTEM_SWITCH2)
     # Starbound stand-alone server.
     add_subdirectory(server)
 

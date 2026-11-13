@@ -1,3 +1,4 @@
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarImageMetadataDatabase.hpp"
 
 #include "StarAssets.hpp"
@@ -19,7 +20,10 @@ ImageMetadataDatabase::ImageMetadataDatabase() {
 }
 
 Vec2U ImageMetadataDatabase::imageSize(AssetPath const& path) const {
-  MutexLocker locker(m_mutex);
+  Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::MetadataLock);
+  MutexLocker locker(m_mutex, false);
+  Switch2WaitProfile::acquire(locker, Switch2WaitProfile::Metric::MetadataContended);
+  lockWait.stop();
   auto i = m_sizeCache.find(path);
   if (i != m_sizeCache.end()) {
     i->second.first = Time::monotonicMilliseconds();
@@ -44,7 +48,10 @@ Vec2U ImageMetadataDatabase::imageSize(AssetPath const& path) const {
 List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F position, float fillLimit, bool flip) const {
   SpacesEntry key = make_tuple(path, Vec2I::round(position), fillLimit, flip);
 
-  MutexLocker locker(m_mutex);
+  Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::MetadataLock);
+  MutexLocker locker(m_mutex, false);
+  Switch2WaitProfile::acquire(locker, Switch2WaitProfile::Metric::MetadataContended);
+  lockWait.stop();
   auto i = m_spacesCache.find(key);
   if (i != m_spacesCache.end()) {
     i->second.first = Time::monotonicMilliseconds();
@@ -118,7 +125,10 @@ List<Vec2I> ImageMetadataDatabase::imageSpaces(AssetPath const& path, Vec2F posi
 }
 
 RectU ImageMetadataDatabase::nonEmptyRegion(AssetPath const& path) const {
-  MutexLocker locker(m_mutex);
+  Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::MetadataLock);
+  MutexLocker locker(m_mutex, false);
+  Switch2WaitProfile::acquire(locker, Switch2WaitProfile::Metric::MetadataContended);
+  lockWait.stop();
   auto i = m_regionCache.find(path);
   if (i != m_regionCache.end()) {
     i->second.first = Time::monotonicMilliseconds();
@@ -158,7 +168,10 @@ RectU ImageMetadataDatabase::nonEmptyRegion(AssetPath const& path) const {
 }
 
 void ImageMetadataDatabase::cleanup(bool triggered) {
+  Switch2WaitProfile::Background wait("metadata-cleanup-lock");
   MutexLocker locker(m_mutex);
+  wait.stop();
+  Switch2WaitProfile::Background held("metadata-cleanup-held");
   if (triggered) {
     m_regionCache.clear();
     m_spacesCache.clear();

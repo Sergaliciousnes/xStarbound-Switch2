@@ -1,4 +1,5 @@
 #include "StarObject.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarConfigLuaBindings.hpp"
 #include "StarDamageManager.hpp"
@@ -455,23 +456,31 @@ void Object::update(float dt, uint64_t) {
 }
 
 void Object::render(RenderCallback* renderCallback) {
+  STAR_EXPLORATION_SCOPE(objectRender,Switch2ExplorationProfile::Kind::ObjectRender,m_config->name.utf8Ptr(),entityId(),true);
+  STAR_EXPLORATION_SCOPE(objectEffects,Switch2ExplorationProfile::Kind::ObjectEffects,m_config->name.utf8Ptr(),entityId(),true);
   renderParticles(renderCallback);
   renderSounds(renderCallback);
+  objectEffects.stop();
 
+  STAR_EXPLORATION_SCOPE(objectTags,Switch2ExplorationProfile::Kind::ObjectTags,m_config->name.utf8Ptr(),entityId(),true);
   for (auto const& imageKeyPair : m_imageKeys)
     m_networkedAnimator->setGlobalTag(imageKeyPair.first, imageKeyPair.second);
 
+  objectTags.stop();
   renderCallback->addAudios(m_networkedAnimatorDynamicTarget.pullNewAudios());
   renderCallback->addParticles(m_networkedAnimatorDynamicTarget.pullNewParticles());
 
-  if (m_networkedAnimator->parts().count() > 0) {
+  if (m_networkedAnimator->hasParts()) {
+    STAR_EXPLORATION_SCOPE(objectAnimator,Switch2ExplorationProfile::Kind::ObjectAnimator,m_config->name.utf8Ptr(),entityId(),true);
     renderCallback->addDrawables(m_networkedAnimator->drawables(position() + m_animationPosition + damageShake()), renderLayer());
   } else {
+    STAR_EXPLORATION_SCOPE(objectOrientation,Switch2ExplorationProfile::Kind::ObjectOrientation,m_config->name.utf8Ptr(),entityId(),true);
     if (m_orientationIndex != NPos)
       renderCallback->addDrawables(orientationDrawables(m_orientationIndex), renderLayer(), position());
   }
 
-  for (auto drawablePair : m_scriptedAnimator.drawables())
+  STAR_EXPLORATION_SCOPE(objectScripted,Switch2ExplorationProfile::Kind::ObjectScripted,m_config->name.utf8Ptr(),entityId(),true);
+  for (auto const& drawablePair : m_scriptedAnimator.drawables())
     renderCallback->addDrawable(drawablePair.first, drawablePair.second.value(renderLayer()));
   renderCallback->addParticles(m_scriptedAnimator.pullNewParticles());
   renderCallback->addAudios(m_scriptedAnimator.pullNewAudios());

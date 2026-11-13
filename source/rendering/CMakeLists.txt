@@ -34,4 +34,7 @@ target_link_libraries(star_rendering
 target_precompile_headers(star_rendering REUSE_FROM star_core)
 
 add_library(Star::Rendering ALIAS star_rendering)
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+    set_property(SOURCE StarTilePainter.cpp StarAssetTextureGroup.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
 

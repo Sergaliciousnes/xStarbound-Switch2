@@ -74,7 +74,7 @@ static int l_checkmode (const char *mode) {
 
 #if !defined(l_popen)		/* { */
 
-#if defined(LUA_USE_POSIX)	/* { */
+#if defined(LUA_USE_POSIX) && !defined(__SWITCH2__)	/* { */
 
 #define l_popen(L,c,m)		(fflush(NULL), popen(c,m))
 #define l_pclose(L,file)	(pclose(file))

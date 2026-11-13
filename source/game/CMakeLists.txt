@@ -385,3 +385,10 @@ else()
 endif()
 
 add_library(Star::Game ALIAS star_game_interface)
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+    set_property(SOURCE StarWorldClient.cpp StarUniverseClient.cpp StarStatistics.cpp StarPlayerStorage.cpp StarWorldServerThread.cpp StarWorldServer.cpp StarNpc.cpp StarActorMovementController.cpp StarObject.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_RAM_SHIP_STORAGE)
+  set_source_files_properties(StarWorldStorage.cpp StarUniverseServer.cpp PROPERTIES COMPILE_DEFINITIONS STAR_SWITCH2_RAM_SHIP_STORAGE)
+endif()

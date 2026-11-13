@@ -15,6 +15,9 @@ build-windows-msvc/
 build-debug/
 build-clion/
 build/
+build-switch2/
+build-switch2-optimized/
+dist-switch2/
 dist/
 dist-qt/
 dist-static/
@@ -73,3 +76,12 @@ sourcetrail_dependencies/
 *.srctrlbm
 *.srctrldb
 *.srctrlprj
+
+# Local Switch 2 builds and gameplay data
+/build-switch2*/
+/storage/
+/*.pdb
+
+# Python analysis-tool caches
+__pycache__/
+*.py[cod]

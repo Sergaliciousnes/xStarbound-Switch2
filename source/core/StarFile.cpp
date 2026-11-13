@@ -1,9 +1,24 @@
+#include "StarSwitch2WaitProfile.hpp"
+#include "StarSwitch2IoProfile.hpp"
 #include "StarFile.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarFormat.hpp"
 
 #include <fstream>
 
 namespace Star {
+
+#ifdef STAR_SWITCH2_IO_PROFILE
+#define STAR_FILE_IO(op, requested, offset) Switch2IoProfile::Operation profileIo(m_ioProfileFile, Switch2IoProfile::Op::op, requested, offset)
+#else
+#define STAR_FILE_IO(op, requested, offset) Switch2IoProfile::Operation profileIo(0, Switch2IoProfile::Op::op, requested, offset)
+#endif
+
+#ifdef STAR_SYSTEM_SWITCH2
+#define STAR_FILE_CURSOR_LOCK Switch2WaitProfile::Scope cursorWait(Switch2WaitProfile::Metric::FileCursor); std::lock_guard<std::recursive_mutex> cursorLock(m_positionMutex); cursorWait.stop()
+#else
+#define STAR_FILE_CURSOR_LOCK
+#endif
 
 void File::makeDirectoryRecursive(String const& fileName) {
   auto parent = dirName(fileName);
@@ -131,56 +146,103 @@ File::~File() {
 }
 
 StreamOffset File::pos() {
+  STAR_FILE_IO(Tell, 0, -1);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   if (!m_file)
     throw IOException("pos called on closed File");
 
-  return ftell(m_file);
+  auto result = ftell(m_file);
+  profileIo.complete();
+  return result;
 }
 
 void File::seek(StreamOffset offset, IOSeek seekMode) {
+  STAR_FILE_IO(Seek, 0, offset);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   if (!m_file)
     throw IOException("seek called on closed File");
 
   fseek(m_file, offset, seekMode);
+  profileIo.complete();
 }
 
 StreamOffset File::size() {
-  return fsize(m_file);
+  STAR_FILE_IO(Size, 0, -1);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
+  auto result = fsize(m_file);
+  profileIo.complete();
+  return result;
 }
 
 bool File::atEnd() {
+  STAR_FILE_IO(Eof, 0, -1);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   if (!m_file)
     throw IOException("eof called on closed File");
 
-  return ftell(m_file) >= fsize(m_file);
+  bool result = ftell(m_file) >= fsize(m_file);
+  profileIo.complete();
+  return result;
 }
 
 size_t File::read(char* data, size_t len) {
+  STAR_FILE_IO(Read, len, -1);
+  Switch2FrameProfile::Zone readZone(Switch2FrameProfile::Phase::FileRead);
+  Switch2WaitProfile::Scope ioScope(Switch2WaitProfile::Metric::FileRead);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   if (!m_file)
     throw IOException("read called on closed File");
 
   if (!isReadable())
     throw IOException("read called on non-readable File");
 
-  return fread(m_file, data, len);
+  auto result = fread(m_file, data, len);
+  profileIo.complete(result);
+  return result;
 }
 
 size_t File::write(const char* data, size_t len) {
+  STAR_FILE_IO(Write, len, -1);
+  Switch2FrameProfile::Zone writeZone(Switch2FrameProfile::Phase::FileWrite);
+  Switch2WaitProfile::Scope ioScope(Switch2WaitProfile::Metric::FileWrite);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   if (!m_file)
     throw IOException("write called on closed File");
 
   if (!isWritable())
     throw IOException("write called on non-writable File");
 
-  return fwrite(m_file, data, len);
+  auto result = fwrite(m_file, data, len);
+  profileIo.complete(result);
+  return result;
 }
 
 size_t File::readAbsolute(StreamOffset readPosition, char* data, size_t len) {
-  return pread(m_file, data, len, readPosition);
+  STAR_FILE_IO(ReadAbsolute, len, readPosition);
+  Switch2FrameProfile::Zone readZone(Switch2FrameProfile::Phase::FileRead);
+  Switch2WaitProfile::Scope ioScope(Switch2WaitProfile::Metric::FileRead);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
+  auto result = pread(m_file, data, len, readPosition);
+  profileIo.complete(result);
+  return result;
 }
 
 size_t File::writeAbsolute(StreamOffset writePosition, char const* data, size_t len) {
-  return pwrite(m_file, data, len, writePosition);
+  STAR_FILE_IO(WriteAbsolute, len, writePosition);
+  Switch2FrameProfile::Zone writeZone(Switch2FrameProfile::Phase::FileWrite);
+  Switch2WaitProfile::Scope ioScope(Switch2WaitProfile::Metric::FileWrite);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
+  auto result = pwrite(m_file, data, len, writePosition);
+  profileIo.complete(result);
+  return result;
 }
 
 String File::fileName() const {
@@ -201,6 +263,9 @@ void File::remove() {
 }
 
 void File::resize(StreamOffset s) {
+  STAR_FILE_IO(Resize, s, -1);
+  STAR_FILE_CURSOR_LOCK;
+  profileIo.acquired();
   bool tempOpen = false;
   if (!isOpen()) {
     tempOpen = true;
@@ -211,13 +276,18 @@ void File::resize(StreamOffset s) {
 
   if (tempOpen)
     close();
+  profileIo.complete();
 }
 
 void File::sync() {
+  STAR_FILE_IO(Sync, 0, -1);
+  Switch2FrameProfile::Zone syncZone(Switch2FrameProfile::Phase::FileSync);
+  Switch2WaitProfile::Scope ioScope(Switch2WaitProfile::Metric::FileSync);
   if (!m_file)
     throw IOException("sync called on closed File");
 
   fsync(m_file);
+  profileIo.complete();
 }
 
 void File::open(IOMode m) {
@@ -225,13 +295,21 @@ void File::open(IOMode m) {
   if (m_filename.empty())
     throw IOException("Cannot open file, no filename set");
 
+#ifdef STAR_SWITCH2_IO_PROFILE
+  m_ioProfileFile = Switch2IoProfile::file(m_filename.utf8Ptr());
+#endif
+  STAR_FILE_IO(Open, 0, -1);
   m_file = fopen(m_filename.utf8Ptr(), m);
   setMode(m);
+  profileIo.complete();
 }
 
 void File::close() {
-  if (m_file)
+  if (m_file) {
+    STAR_FILE_IO(Close, 0, -1);
     fclose(m_file);
+    profileIo.complete();
+  }
   m_file = 0;
   setMode(IOMode::Closed);
 }

@@ -1,4 +1,8 @@
+#include "StarSwitch2WaitProfile.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarUniverseClient.hpp"
+#include "StarSwitch2FrameProfile.hpp"
+#include "StarSwitch2Diagnostics.hpp"
 #include "StarAssets.hpp"
 #include "StarCelestialLuaBindings.hpp"
 #include "StarClientContext.hpp"
@@ -282,6 +286,8 @@ SystemWorldClientPtr UniverseClient::systemWorldClient() const {
 }
 
 void UniverseClient::update(float dt) {
+  Switch2WaitProfile::Scope waitUniverse(Switch2WaitProfile::Metric::ClientUniverse);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: warp/cinematics");
   ZoneScopedN("Universe client update");
 
   auto assets = Root::singleton().assets();
@@ -338,32 +344,54 @@ void UniverseClient::update(float dt) {
 
   {
     ZoneScopedN("Packet reception");
+    Switch2WaitProfile::Scope waitReceive(Switch2WaitProfile::Metric::PacketReceive);
+    Switch2FrameProfile::Zone packetZone(Switch2FrameProfile::Phase::Packets);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: receive packets");
     m_connection->receive();
   }
   {
     ZoneScopedN("Packet handling");
+    Switch2WaitProfile::Scope waitHandle(Switch2WaitProfile::Metric::PacketHandle);
+    Switch2FrameProfile::Zone packetZone(Switch2FrameProfile::Phase::Packets);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: handle packets");
     handlePackets(std::move(m_connection->pull()));
   }
 
   if (!isConnected())
     return;
 
-  LogMap::set("universe_time_client", m_universeClock->time());
+  STAR_LOG_MAP_SET("universe_time_client", m_universeClock->time());
 
-  m_statistics->update();
+  {
+    STAR_EXPLORATION_SCOPE(statisticsTrace,Switch2ExplorationProfile::Kind::UniverseStatistics);
+    m_statistics->update();
+  }
 
   if (!m_pause) {
-    m_worldClient->update(dt);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: world update");
+    {
+      Switch2FrameProfile::Zone worldZone(Switch2FrameProfile::Phase::WorldUpdate);
+      Switch2WaitProfile::Scope wait_worldZone(Switch2WaitProfile::Metric::WorldUpdate);
+      STAR_EXPLORATION_SCOPE(worldTrace,Switch2ExplorationProfile::Kind::WorldStep);
+      m_worldClient->update(dt);
+    }
     {
       ZoneScopedN("Universe client scripts");
+      STAR_EXPLORATION_SCOPE(scriptsTrace,Switch2ExplorationProfile::Kind::UniverseScripts);
+      Switch2FrameProfile::Zone scriptZone(Switch2FrameProfile::Phase::PlayerScripts);
+      Switch2WaitProfile::Scope wait_scriptZone(Switch2WaitProfile::Metric::PlayerScripts);
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: player scripts");
       for (auto& p : m_scriptContexts)
         p.second->update();
     }
   }
   m_connection->push(m_worldClient->getOutgoingPackets());
 
-  if (!m_pause)
-    m_systemWorldClient->update(dt);
+  {
+    Switch2WaitProfile::Scope waitSystem(Switch2WaitProfile::Metric::SystemUpdate);
+    if (!m_pause)
+      m_systemWorldClient->update(dt);
+  }
   m_connection->push(m_systemWorldClient->pullOutgoingPackets());
 
   m_teamClient->update();
@@ -376,9 +404,16 @@ void UniverseClient::update(float dt) {
   if (!celestialRequests.empty())
     m_connection->pushSingle(make_shared<CelestialRequestPacket>(std::move(celestialRequests)));
 
-  m_connection->send();
+  {
+    Switch2WaitProfile::Scope waitSend(Switch2WaitProfile::Metric::PacketSend);
+    m_connection->send();
+  }
 
   if (Time::monotonicMilliseconds() >= m_storageTriggerDeadline) {
+    Switch2WaitProfile::Scope waitSave(Switch2WaitProfile::Metric::PlayerSave);
+    Switch2FrameProfile::Zone storageZone(Switch2FrameProfile::Phase::StorageSave);
+    Switch2FrameProfile::count(Switch2FrameProfile::Counter::Saves, 1);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe: save player/storage");
     // if (m_mainPlayer) {
     //   m_playerStorage->savePlayer(m_mainPlayer);
     //   m_playerStorage->moveToFront(m_mainPlayer->uuid());
@@ -453,13 +488,13 @@ void UniverseClient::update(float dt) {
 
   // FezzedOne: Borrowed this from OpenStarbound.
   if (auto netStats = m_connection->incomingStats()) {
-    LogMap::set("net_total_incoming", strf("{:4.3f} KB/s", netStats->bytesPerSecond / 1000.f));
-    LogMap::set("net_worst_incoming", strf("^cyan;{}^reset; ({:4.3f} KB/s)",
+    STAR_LOG_MAP_SET("net_total_incoming", strf("{:4.3f} KB/s", netStats->bytesPerSecond / 1000.f));
+    STAR_LOG_MAP_SET("net_worst_incoming", strf("^cyan;{}^reset; ({:4.3f} KB/s)",
                                           PacketTypeNames.getRight(netStats->worstPacketType), (float)netStats->worstPacketSize / 1000.f));
   }
   if (auto netStats = m_connection->outgoingStats()) {
-    LogMap::set("net_total_outgoing", strf("{:4.3f} KB/s", netStats->bytesPerSecond / 1000.f));
-    LogMap::set("net_worst_outgoing", strf("^cyan;{}^reset; ({:4.3f} KB/s)",
+    STAR_LOG_MAP_SET("net_total_outgoing", strf("{:4.3f} KB/s", netStats->bytesPerSecond / 1000.f));
+    STAR_LOG_MAP_SET("net_worst_outgoing", strf("^cyan;{}^reset; ({:4.3f} KB/s)",
                                           PacketTypeNames.getRight(netStats->worstPacketType), (float)netStats->worstPacketSize / 1000.f));
   }
 }
@@ -1323,14 +1358,18 @@ void UniverseClient::setPause(bool pause) {
 }
 
 void UniverseClient::handlePackets(List<PacketPtr> const& packets) {
+  Switch2FrameProfile::count(Switch2FrameProfile::Counter::Packets, packets.size());
   ZoneScoped;
 
   for (auto const& packet : packets) {
+    STAR_EXPLORATION_SCOPE(packetTrace,Switch2ExplorationProfile::Kind::Packet,PacketTypeNames.getRight(packet->type()).utf8Ptr());
     if (auto clientContextUpdate = as<ClientContextUpdatePacket>(packet)) {
       try {
         m_clientContext->readUpdate(clientContextUpdate->updateData);
-        if (m_shouldUpdateMainPlayerShip)
+        if (m_shouldUpdateMainPlayerShip) {
+          Switch2WaitProfile::Scope waitShipSave(Switch2WaitProfile::Metric::PlayerSave);
           m_playerStorage->applyShipUpdates(m_clientContext->playerUuid(), m_clientContext->newShipUpdates());
+        }
 
         // FezzedOne: Don't apply ship upgrades on protected ships.
         if (playerIsOriginal() && m_shouldUpdateMainPlayerShip)

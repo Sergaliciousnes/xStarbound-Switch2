@@ -1,5 +1,6 @@
 #ifndef STAR_CHAT_HPP
 #define STAR_CHAT_HPP
+#include <optional>
 
 #include "StarPane.hpp"
 #include "StarBaseScriptPane.hpp"
@@ -102,6 +103,9 @@ private:
 
   Map<MessageContext::Mode, String> m_colorCodes;
   Deque<LogMessage> m_receivedMessages;
+#ifdef STAR_SYSTEM_SWITCH2
+  std::optional<JsonArray> m_persistedMessages;
+#endif
 
   Set<MessageContext::Mode> m_modeFilter;
   ChatSendMode m_sendMode;

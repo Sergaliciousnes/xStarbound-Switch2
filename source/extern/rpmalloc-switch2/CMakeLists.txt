@@ -1,0 +1,3 @@
+add_library(rpmalloc_switch2_candidate STATIC rpmalloc.c)
+target_include_directories(rpmalloc_switch2_candidate PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(rpmalloc_switch2_candidate PRIVATE ENABLE_OVERRIDE=0 ENABLE_PRELOAD=0 RPMALLOC_CONFIGURABLE=1 ENABLE_VALIDATE_ARGS=1 ENABLE_ASSERTS=1)

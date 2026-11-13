@@ -1,4 +1,6 @@
 #include "StarLua.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarArray.hpp"
 #include "StarLogging.hpp"
 #include "StarTime.hpp"
@@ -224,11 +226,15 @@ Maybe<JsonArray> LuaConverter<JsonArray>::to(LuaEngine& engine, LuaValue v) {
 }
 
 LuaEnginePtr LuaEngine::create(bool safe) {
+  STAR_EXPLORATION_SCOPE(vmCreate,Switch2ExplorationProfile::Kind::VmCreate,safe ? "safe" : "unsafe");
+  STAR_EXPLORATION_SCOPE(vmState,Switch2ExplorationProfile::Kind::VmState);
   LuaEnginePtr self(new LuaEngine);
 
   // FezzedOne: Undocumented change to Pluto v0.12 where a seed argument is now required for new Lua states.
   self->m_state = lua_newstate(allocate, nullptr, (unsigned)Time::monotonicMilliseconds());
 
+  vmState.stop();
+  STAR_EXPLORATION_SCOPE(vmRegistry,Switch2ExplorationProfile::Kind::VmRegistry);
   self->m_scriptDefaultEnvRegistryId = LUA_NOREF;
   self->m_wrappedFunctionMetatableRegistryId = LUA_NOREF;
   self->m_requireFunctionMetatableRegistryId = LUA_NOREF;
@@ -304,6 +310,8 @@ LuaEnginePtr LuaEngine::create(bool safe) {
 
   // Load all base libraries and prune them of unsafe functions
 
+  vmRegistry.stop();
+  STAR_EXPLORATION_SCOPE(vmBase,Switch2ExplorationProfile::Kind::VmBase);
   luaL_requiref(self->m_state, "_ENV", luaopen_base, true);
   if (safe) {
     StringSet baseWhitelist = {
@@ -354,6 +362,8 @@ LuaEnginePtr LuaEngine::create(bool safe) {
   }
   lua_pop(self->m_state, 1);
 
+  vmBase.stop();
+  STAR_EXPLORATION_SCOPE(vmOs,Switch2ExplorationProfile::Kind::VmOs);
   luaL_requiref(self->m_state, "os", luaopen_os, true);
   if (safe) {
     StringSet osWhitelist = {"clock", "difftime", "time", "date",
@@ -373,8 +383,10 @@ LuaEnginePtr LuaEngine::create(bool safe) {
   }
   lua_pop(self->m_state, 1);
 
+  vmOs.stop();
   // loads a lua base library, leaves it at the top of the stack
   auto loadBaseLibrary = [](lua_State* state, char const* modname, lua_CFunction openf) {
+    STAR_EXPLORATION_SCOPE(libraryTrace,Switch2ExplorationProfile::Kind::VmLibrary,modname);
     luaL_requiref(state, modname, openf, true);
 
     /* FezzedOne: Not needed anymore. Actually causes a weird edge case with the DigitalStorage mod. {
@@ -428,6 +440,7 @@ LuaEnginePtr LuaEngine::create(bool safe) {
     lua_pop(self->m_state, 6);
   }
 
+  STAR_EXPLORATION_SCOPE(vmFinalize,Switch2ExplorationProfile::Kind::VmFinalize);
   // Make a shallow copy of the default script environment and save it for
   // resetting the global state.
   lua_rawgeti(self->m_state, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
@@ -636,6 +649,7 @@ LuaContext LuaEngine::createContext() {
 }
 
 void LuaEngine::collectGarbage(Maybe<unsigned> steps) {
+  Switch2FrameProfile::Zone gcZone(Switch2FrameProfile::Phase::LuaGc);
   for (auto handleIndex : take(m_handleFree)) {
     lua_pushnil(m_handleThread);
     lua_replace(m_handleThread, handleIndex);
@@ -786,6 +800,7 @@ void LuaEngine::handleError(lua_State* state, int res) {
 }
 
 int LuaEngine::pcallWithTraceback(lua_State* state, int nargs, int nresults) {
+  Switch2FrameProfile::Zone callZone(Switch2FrameProfile::Phase::LuaCalls);
   int msghPosition = lua_gettop(state) - nargs;
   lua_rawgeti(m_state, LUA_REGISTRYINDEX, m_pcallTracebackMessageHandlerRegistryId);
   lua_insert(state, msghPosition);
@@ -814,7 +829,11 @@ int LuaEngine::coresumeWithTraceback(lua_State* state) {
 
   lua_xmove(state, co, args);
   int results;
-  int status = lua_resume(co, state, args, &results);
+  int status;
+  {
+    Switch2FrameProfile::Zone resumeZone(Switch2FrameProfile::Phase::LuaCalls);
+    status = lua_resume(co, state, args, &results);
+  }
   // lua_pop(co, results);
   if (status == LUA_OK || status == LUA_YIELD) {
     // int res = lua_gettop(co);

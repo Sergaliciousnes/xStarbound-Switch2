@@ -1,4 +1,5 @@
 #include "StarPaneManager.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarGameTypes.hpp"
 #include "StarJsonExtra.hpp"
@@ -270,6 +271,7 @@ bool PaneManager::sendInputEvent(InputEvent const& event) {
 }
 
 void PaneManager::render() {
+  STAR_EXPLORATION_SCOPE(paneRender,Switch2ExplorationProfile::Kind::UiPaneRender,"pane-manager");
   if (m_backgroundWidget) {
     auto size = m_backgroundWidget->size();
     m_backgroundWidget->setPosition(Vec2I((windowSize()[0] - size[0]) / 2, (windowSize()[1] - size[1]) / 2));
@@ -284,6 +286,7 @@ void PaneManager::render() {
               calculateNewInterfacePosition(panePair.first, m_prevInterfaceScale / m_context->interfaceScale()));
 
         panePair.first->setDrawingOffset(calculatePaneOffset(panePair.first));
+        STAR_EXPLORATION_SCOPE(onePane,Switch2ExplorationProfile::Kind::UiPaneRender,panePair.first->name().utf8Ptr());
         panePair.first->render(RectI(Vec2I(), windowSize()));
       }
     }
@@ -294,6 +297,7 @@ void PaneManager::render() {
 }
 
 void PaneManager::update(float dt) {
+  STAR_EXPLORATION_SCOPE(paneUpdate,Switch2ExplorationProfile::Kind::UiPaneUpdate,"pane-manager");
   m_tooltipShowTimer -= GlobalTimestep;
   if (m_tooltipShowTimer < 0 && !m_activeTooltip) {
     if (auto parentPane = getPaneAt(m_tooltipLastMousePos)) {
@@ -337,8 +341,10 @@ void PaneManager::update(float dt) {
   for (auto const& layerPair : reverseIterate(m_displayedPanes)) {
     for (auto const& panePair : reverseIterate(layerPair.second)) {
       panePair.first->tick(dt);
-      if (panePair.first->active())
+      if (panePair.first->active()) {
+        STAR_EXPLORATION_SCOPE(onePane,Switch2ExplorationProfile::Kind::UiPaneUpdate,panePair.first->name().utf8Ptr());
         panePair.first->update(dt);
+      }
     }
   }
 }

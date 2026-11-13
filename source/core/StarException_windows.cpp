@@ -12,30 +12,50 @@
 #include <DbgHelp.h>
 #endif
 
+// Tracy and engine stack traces share DbgHelp, whose API is not thread-safe.
+// INIT_ONCE is usable even when Tracy starts before C++ static initialization.
+namespace {
+INIT_ONCE dbgHelpOnce = INIT_ONCE_STATIC_INIT;
+CRITICAL_SECTION sharedDbgHelpLock;
+BOOL CALLBACK initializeDbgHelpLock(PINIT_ONCE, PVOID, PVOID*) {
+  InitializeCriticalSection(&sharedDbgHelpLock);
+  return TRUE;
+}
+}
+extern "C" void StarDbgHelpInit() { InitOnceExecuteOnce(&dbgHelpOnce, initializeDbgHelpLock, nullptr, nullptr); }
+extern "C" void StarDbgHelpLock() { StarDbgHelpInit(); EnterCriticalSection(&sharedDbgHelpLock); }
+extern "C" void StarDbgHelpUnlock() { LeaveCriticalSection(&sharedDbgHelpLock); }
+
 namespace Star {
 
 struct WindowsSymInitializer {
   WindowsSymInitializer() {
-    if (!SymInitialize(GetCurrentProcess(), NULL, TRUE))
+    // A distinct real process handle identifies the engine's symbol session;
+    // GetCurrentProcess() collides with Tracy's independently initialized one.
+    HANDLE current = GetCurrentProcess();
+    if (!DuplicateHandle(current, current, current, &process, 0, FALSE, DUPLICATE_SAME_ACCESS))
+      fatalError("Could not duplicate process handle for symbols", false);
+    StarDbgHelpLock();
+    BOOL initialized = SymInitialize(process, NULL, TRUE);
+    StarDbgHelpUnlock();
+    if (!initialized)
       fatalError("SymInitialize failed", false);
   }
+  // Keep the session/handle alive until process exit, including late exception
+  // reporting during static teardown.
+  HANDLE process = nullptr;
 };
 static WindowsSymInitializer g_windowsSymInitializer;
 
 struct DbgHelpLock {
-  DbgHelpLock() {
-    InitializeCriticalSection(&criticalSection);
-  }
-
   void lock() {
-    EnterCriticalSection(&criticalSection);
+    StarDbgHelpLock();
   }
 
   void unlock() {
-    LeaveCriticalSection(&criticalSection);
+    StarDbgHelpUnlock();
   }
 
-  CRITICAL_SECTION criticalSection;
 };
 static DbgHelpLock g_dbgHelpLock;
 
@@ -44,7 +64,7 @@ static size_t const StackLimit = 256;
 typedef pair<Array<DWORD64, StackLimit>, size_t> StackCapture;
 
 inline StackCapture captureStack() {
-  HANDLE process = GetCurrentProcess();
+  HANDLE process = g_windowsSymInitializer.process;
   HANDLE thread = GetCurrentThread();
 
   CONTEXT context;
@@ -124,7 +144,7 @@ inline StackCapture captureStack() {
 
 OutputProxy outputStack(StackCapture stack) {
   return OutputProxy([stack = std::move(stack)](std::ostream & os) {
-    HANDLE process = GetCurrentProcess();
+    HANDLE process = g_windowsSymInitializer.process;
     g_dbgHelpLock.lock();
     for (size_t i = 0; i < stack.second; ++i) {
       char buffer[sizeof(SYMBOL_INFO) + MAX_SYM_NAME * sizeof(TCHAR)];

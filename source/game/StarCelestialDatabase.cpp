@@ -1,4 +1,5 @@
 #include "StarCelestialDatabase.hpp"
+#include "StarSwitch2Diagnostics.hpp"
 #include "StarLexicalCast.hpp"
 #include "StarCasting.hpp"
 #include "StarRandom.hpp"
@@ -210,6 +211,8 @@ Maybe<CelestialCoordinate> CelestialMasterDatabase::findRandomWorld(unsigned tri
   if (seed)
     randSource.init(*seed);
   for (unsigned i = 0; i < tries; ++i) {
+    Switch2Diagnostics::count(Switch2Diagnostics::Counter::SearchAttempts);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "scan randomized starter candidates");
     RectI range = xyRange();
     Vec2I randomLocation = Vec2I(randSource.randInt(range.xMin(), range.xMax()), randSource.randInt(range.yMin(), range.yMax()));
     for (auto& system : scanSystems(RectI::withCenter(randomLocation, Vec2I::filled(trySpatialRange)))) {
@@ -382,10 +385,12 @@ Maybe<CelestialOrbitRegion> CelestialMasterDatabase::orbitRegion(
 }
 
 CelestialChunk const& CelestialMasterDatabase::getChunk(Vec2I const& chunkIndex, UnlockDuringFunction unlockDuring) {
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "chunk cache lookup");
   return m_chunkCache.get(chunkIndex, [&](Vec2I const& chunkIndex) -> CelestialChunk {
       auto versioningDatabase = Root::singleton().versioningDatabase();
 
       if (m_database.isOpen()) {
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "read celestial chunk database");
         if (auto chunkData = m_database.find(DataStreamBuffer::serialize(chunkIndex))) {
           auto versionedChunk = DataStreamBuffer::deserialize<VersionedJson>(uncompressData(chunkData.take()));
           if (!versioningDatabase->versionedJsonCurrent(versionedChunk)) {
@@ -393,22 +398,30 @@ CelestialChunk const& CelestialMasterDatabase::getChunk(Vec2I const& chunkIndex,
             m_database.insert(DataStreamBuffer::serialize(chunkIndex),
                 compressData(DataStreamBuffer::serialize<VersionedJson>(versionedChunk)));
           }
+          Switch2Diagnostics::count(Switch2Diagnostics::Counter::Chunks);
+          Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "chunk loaded");
           return CelestialChunk(versionedChunk.content);
         }
       }
 
       CelestialChunk newChunk;
-      auto producer = [&]() { newChunk = produceChunk(chunkIndex); };
+      auto producer = [&]() {
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "generate celestial chunk");
+        newChunk = produceChunk(chunkIndex);
+      };
       if (unlockDuring)
         unlockDuring(producer);
       else
         producer();
       if (m_database.isOpen()) {
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "serialize/write celestial chunk");
         auto versionedChunk = versioningDatabase->makeCurrentVersionedJson("CelestialChunk", newChunk.toJson());
         m_database.insert(DataStreamBuffer::serialize(chunkIndex),
             compressData(DataStreamBuffer::serialize<VersionedJson>(versionedChunk)));
       }
 
+      Switch2Diagnostics::count(Switch2Diagnostics::Counter::Chunks);
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Celestial, "chunk generated and stored");
       return newChunk;
     });
 }

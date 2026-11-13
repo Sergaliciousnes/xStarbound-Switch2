@@ -1,4 +1,6 @@
 #include "StarMainInterface.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarApplicationController.hpp"
 #include "StarActionBar.hpp"
 #include "StarActiveItem.hpp"
 #include "StarAiInterface.hpp"
@@ -401,6 +403,19 @@ MerchantPanePtr MainInterface::activeMerchantPane() const {
 }
 
 bool MainInterface::handleInputEvent(InputEvent const& event) {
+  STAR_EXPLORATION_SCOPE(interfaceTrace,Switch2ExplorationProfile::Kind::UiInput);
+#ifdef STAR_SYSTEM_SWITCH2
+  // Native HID maps Minus to Back; SDL controller events are disabled on this
+  // platform, so this request is delivered exactly once per physical press.
+  if (auto button = event.ptr<ControllerButtonDownEvent>(); button && button->controllerButton == ControllerButton::Back) {
+    m_chat->startChat();
+    auto edited = m_guiContext->applicationController()->editText(m_chat->currentChat(), false);
+    m_chat->clearCurrentChat();
+    m_chat->stopChat();
+    if (edited && !edited->empty()) doChat(*edited, true);
+    return true;
+  }
+#endif
   auto player = m_client->mainPlayer();
   auto inv = player->inventory();
   auto& root = Root::singleton();
@@ -518,6 +533,7 @@ bool MainInterface::textInputActive() const {
 }
 
 void MainInterface::handleInteractAction(InteractAction interactAction) {
+  STAR_EXPLORATION_SCOPE(interfaceTrace,Switch2ExplorationProfile::Kind::UiInteract);
   auto assets = Root::singleton().assets();
   auto world = m_client->worldClient();
 
@@ -645,6 +661,7 @@ void MainInterface::handleInteractAction(InteractAction interactAction) {
 }
 
 void MainInterface::update(float dt) {
+  STAR_EXPLORATION_SCOPE(interfaceTrace,Switch2ExplorationProfile::Kind::UiUpdate);
   ZoneScoped;
 
   // FezzedOne: Need to make sure the entity map is correctly initialised first
@@ -676,7 +693,10 @@ void MainInterface::update(float dt) {
   player->passChatOpen(m_chat->hasFocus());
 
   // update inventory pane items, to know if item slots changed
-  m_inventoryWindow->updateItems();
+  {
+    STAR_EXPLORATION_SCOPE(inventoryTrace,Switch2ExplorationProfile::Kind::UiInventoryUpdate);
+    m_inventoryWindow->updateItems();
+  }
 
   // update mouseover target
   EntityId newMouseOverTarget = NullEntityId;
@@ -974,6 +994,7 @@ void MainInterface::renderInWorldElements() {
 }
 
 void MainInterface::render() {
+  STAR_EXPLORATION_SCOPE(interfaceTrace,Switch2ExplorationProfile::Kind::UiRender);
   if (m_disableHud)
     return;
 
@@ -1567,6 +1588,9 @@ void MainInterface::renderWindows() {
 }
 
 void MainInterface::renderDebug() {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return;
+#endif
   if (!isDebugDisplayed()) {
     SpatialLogger::clear();
     m_debugTextRect = RectF::null();

@@ -364,7 +364,7 @@ void Projectile::update(float dt, uint64_t) {
   }
 
   if (world()->isClient())
-    SpatialLogger::logPoly("world", m_movementController->collisionBody(), Color::Red.toRgba());
+    STAR_SPATIAL_LOG(logPoly, "world", m_movementController->collisionBody(), Color::Red.toRgba());
 }
 
 void Projectile::render(RenderCallback* renderCallback) {

@@ -79,6 +79,9 @@ private:
   size_t m_cursorOffset;
   bool m_isHover;
   bool m_isPressed;
+#ifdef STAR_SYSTEM_SWITCH2
+  bool m_textEditArmed = false;
+#endif
   SpecialRepeatKeyCodes m_repeatCode;
   int64_t m_repeatKeyThreshold;
   WidgetCallbackFunc m_callback;

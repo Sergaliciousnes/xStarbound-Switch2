@@ -37,7 +37,11 @@ Spawner::Spawner() {
 
   m_active = config.getBool("defaultActive", true);
 
+#ifdef STAR_DISABLE_DEBUG_HUD
+  m_debug = false;
+#else
   m_debug = config.getBool("debug", false);
+#endif
 }
 
 void Spawner::init(SpawnerFacadePtr facade) {
@@ -318,6 +322,9 @@ void Spawner::spawnInCell(Vec2I const& cell) {
 }
 
 void Spawner::debugShowSpawnCells() {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return;
+#endif
   eraseWhere(m_debugSpawnInfo, [this](auto& p) {
       return !m_activeSpawnCells.contains(p.first);
     });
@@ -333,16 +340,16 @@ void Spawner::debugShowSpawnCells() {
   for (auto const& debugInfo : m_debugSpawnInfo) {
     RectF spawnRegion = Spawner::cellRegion(debugInfo.first);
     if (regionVisibleToClient(spawnRegion)) {
-      SpatialLogger::logPoly("world", PolyF(spawnRegion), {128, 0, 0, 255});
+      STAR_SPATIAL_LOG(logPoly, "world", PolyF(spawnRegion), {128, 0, 0, 255});
       StringList areaList;
       for (auto area : debugInfo.second.spawnParameters.areas)
         areaList.append(SpawnParameters::AreaNames.getRight(area).slice(0, 3));
-      SpatialLogger::logText("world", strf("Areas: {}", areaList.join(", ")), spawnRegion.min() + Vec2F(0.5, 2.5), {255, 255, 255, 255});
-      SpatialLogger::logText("world", strf("Region: {}", SpawnParameters::RegionNames.getRight(debugInfo.second.spawnParameters.region)), spawnRegion.min() + Vec2F(0.5, 1.5), {255, 255, 255, 255});
-      SpatialLogger::logText("world", strf("Time: {}", SpawnParameters::TimeNames.getRight(debugInfo.second.spawnParameters.time)), spawnRegion.min() + Vec2F(0.5, 0.5), {255, 255, 255, 255});
+      STAR_SPATIAL_LOG(logText, "world", strf("Areas: {}", areaList.join(", ")), spawnRegion.min() + Vec2F(0.5, 2.5), {255, 255, 255, 255});
+      STAR_SPATIAL_LOG(logText, "world", strf("Region: {}", SpawnParameters::RegionNames.getRight(debugInfo.second.spawnParameters.region)), spawnRegion.min() + Vec2F(0.5, 1.5), {255, 255, 255, 255});
+      STAR_SPATIAL_LOG(logText, "world", strf("Time: {}", SpawnParameters::TimeNames.getRight(debugInfo.second.spawnParameters.time)), spawnRegion.min() + Vec2F(0.5, 0.5), {255, 255, 255, 255});
 
       if (debugInfo.second.spawnAttempts > 0)
-        SpatialLogger::logText("world", strf("Spawns: {} / {}", debugInfo.second.spawns, debugInfo.second.spawnAttempts), spawnRegion.min() + Vec2F(0.5, 3.5), (debugInfo.second.spawnAttempts > debugInfo.second.spawns) ? Color::Red.toRgba() : Color::Green.toRgba());
+        STAR_SPATIAL_LOG(logText, "world", strf("Spawns: {} / {}", debugInfo.second.spawns, debugInfo.second.spawnAttempts), spawnRegion.min() + Vec2F(0.5, 3.5), (debugInfo.second.spawnAttempts > debugInfo.second.spawns) ? Color::Red.toRgba() : Color::Green.toRgba());
     }
   }
 }

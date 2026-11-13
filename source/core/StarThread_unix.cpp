@@ -1,9 +1,13 @@
 #include "StarLogging.hpp"
+#include "StarSwitch2IoProfile.hpp"
+#include "StarSwitch2AllocationProfile.hpp"
 #include "StarThread.hpp"
 #include "StarTime.hpp"
 
 #include <dirent.h>
-#include <dlfcn.h>
+#ifdef STAR_SYSTEM_SWITCH2
+#include <switch.h>
+#endif
 #include <libgen.h>
 #include <limits.h>
 #include <pthread.h>
@@ -34,6 +38,8 @@ struct ThreadImpl {
     ::rpmalloc_thread_initialize();
 #endif
     ThreadImpl* ptr = static_cast<ThreadImpl*>(data);
+    Switch2IoProfile::threadName(ptr->name.utf8Ptr());
+    Switch2AllocationProfile::thread(ptr->name.utf8Ptr());
     try {
 #ifdef STAR_SYSTEM_MACOS
       // ensure the name is under the max allowed
@@ -71,7 +77,19 @@ struct ThreadImpl {
 
     stopped = false;
     joined = false;
+#ifdef STAR_SYSTEM_SWITCH2
+    // World generation and Lua need substantially more than the small
+    // homebrew pthread default stack. Match a conservative desktop budget.
+    pthread_attr_t attr;
+    int ret = pthread_attr_init(&attr);
+    if (ret == 0) {
+      ret = pthread_attr_setstacksize(&attr, 1024 * 1024);
+      if (ret == 0) ret = pthread_create(&pthread, &attr, &runThread, (void*)this);
+      pthread_attr_destroy(&attr);
+    }
+#else
     int ret = pthread_create(&pthread, NULL, &runThread, (void*)this);
+#endif
     if (ret != 0) {
       stopped = true;
       joined = true;
@@ -84,7 +102,7 @@ struct ThreadImpl {
 
 #ifdef STAR_SYSTEM_FREEBSD
     pthread_set_name_np(pthread, tname);
-#elif not defined STAR_SYSTEM_MACOS
+#elif !defined(STAR_SYSTEM_MACOS) && !defined(STAR_SYSTEM_SWITCH2)
     pthread_setname_np(pthread, tname);
 #endif
     return true;
@@ -141,7 +159,7 @@ struct MutexImpl {
   }
 
   void lock() { // Deadlock debugging from OpenStarbound.
-#ifndef STAR_SYSTEM_MACOS
+#if !defined(STAR_SYSTEM_MACOS) && !defined(STAR_SYSTEM_SWITCH2)
     timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
 #define LOCK_TIME 30
@@ -223,7 +241,7 @@ struct RecursiveMutexImpl {
   }
 
   void lock() { // Deadlock debugging from OpenStarbound.
-#ifndef STAR_SYSTEM_MACOS
+#if !defined(STAR_SYSTEM_MACOS) && !defined(STAR_SYSTEM_SWITCH2)
     timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
 #define LOCK_TIME 30
@@ -278,10 +296,18 @@ void Thread::yield() {
 }
 
 unsigned Thread::numberOfProcessors() {
+#ifdef STAR_SYSTEM_SWITCH2
+  u64 coreMask = 0;
+  Result result = svcGetInfo(&coreMask, InfoType_CoreMask, CUR_PROCESS_HANDLE, 0);
+  if (R_FAILED(result) || !coreMask)
+    throw StarException::format("Could not determine allowed CPU cores: {}", result);
+  return static_cast<unsigned>(__builtin_popcountll(coreMask));
+#else
   long nprocs = sysconf(_SC_NPROCESSORS_ONLN);
   if (nprocs < 1)
     throw StarException(strf("Could not determine number of CPUs online: {}\n", strerror(errno)));
   return nprocs;
+#endif
 }
 
 Thread::Thread(String const& name) {

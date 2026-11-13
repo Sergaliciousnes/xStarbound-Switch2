@@ -128,7 +128,19 @@ public:
   virtual ~Renderer() = default;
 
   virtual String rendererId() const = 0;
+  virtual bool supportsWorldRendering() const { return true; }
   virtual Vec2U screenSize() const = 0;
+
+  // Called by the platform when the rendering extent changes, before rendering
+  // at the new size. Presentation and native window ownership remain with the
+  // platform integration.
+  virtual void setScreenSize(Vec2U screenSize) = 0;
+
+  // Frame boundaries do not present the native window. finishFrame must record
+  // or issue all pending draws; it need not wait for GPU completion. Backends
+  // must retain resources referenced by outstanding GPU work.
+  virtual void startFrame() = 0;
+  virtual void finishFrame() = 0;
 
   virtual void loadConfig(Json const& config) = 0;
 
@@ -162,6 +174,8 @@ public:
   virtual void render(RenderPrimitive primitive) = 0;
   virtual void renderBuffer(RenderBufferPtr const& renderBuffer, Mat3F const& transformation = Mat3F::identity()) = 0;
 
+  // Emit pending primitives in order using the current effect and clipping
+  // state. This does not imply presentation or a wait for GPU completion.
   virtual void flush() = 0;
 };
 

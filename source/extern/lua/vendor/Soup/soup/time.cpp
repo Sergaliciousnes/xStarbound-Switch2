@@ -210,6 +210,16 @@ NAMESPACE_SOUP
 
 	std::time_t time::toUnix(int year, int month, int day, int hour, int minute, int second)
 	{
+#ifdef __SWITCH2__
+        // Gregorian civil date to UTC epoch days; no timezone/global TZ changes.
+        year -= month <= 2;
+        const int era = (year >= 0 ? year : year - 399) / 400;
+        const unsigned yoe = static_cast<unsigned>(year - era * 400);
+        const unsigned doy = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+        const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+        const int64_t days = static_cast<int64_t>(era) * 146097 + doe - 719468;
+        return static_cast<std::time_t>(days * 86400 + hour * 3600 + minute * 60 + second);
+#else
 		struct tm t;
 		t.tm_year = year - 1900;
 		t.tm_mon = month - 1;
@@ -218,6 +228,7 @@ NAMESPACE_SOUP
 		t.tm_min = minute;
 		t.tm_sec = second;
 		return timegm(&t);
+#endif
 	}
 
 	int time::isLeapYear(int year)

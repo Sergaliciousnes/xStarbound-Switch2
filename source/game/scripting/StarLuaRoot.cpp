@@ -1,5 +1,7 @@
 #include "StarLuaRoot.hpp"
+#include "StarSwitch2IoProfile.hpp"
 #include "StarAssets.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 
 #ifdef TRACY_ENABLE
   #include "tracy/Tracy.hpp"
@@ -17,6 +19,7 @@ LuaRoot::LuaRoot() {
 
   restart();
 
+  STAR_EXPLORATION_SCOPE(rootBookkeeping,Switch2ExplorationProfile::Kind::VmRootBookkeeping);
   m_rootReloadListener = make_shared<CallbackListener>([cache = m_scriptCache]() {
       cache->clear();
     });
@@ -29,7 +32,12 @@ LuaRoot::~LuaRoot() {
   shutdown();
 }
 
+void LuaRoot::setBytecodeCache(shared_ptr<LuaBytecodeCache> cache) {
+  m_scriptCache->sharedBytecode = std::move(cache);
+}
+
 void LuaRoot::loadScript(String const& assetPath) {
+  if(m_scriptCache->sharedBytecode)m_scriptCache->sharedBytecode->erase(m_scriptCache->sharedKey(assetPath));
   m_scriptCache->loadScript(*m_luaEngine, assetPath);
 }
 
@@ -46,7 +54,11 @@ void LuaRoot::restart() {
 
   auto& root = Root::singleton();
 
-  m_luaEngine = LuaEngine::create(root.configuration()->get("safeScripts").toBool());
+  STAR_EXPLORATION_SCOPE(rootConfig,Switch2ExplorationProfile::Kind::VmRootConfig,"before-engine");
+  m_scriptCache->safeMode = root.configuration()->get("safeScripts").toBool();
+  rootConfig.stop();
+  m_luaEngine = LuaEngine::create(m_scriptCache->safeMode);
+  STAR_EXPLORATION_SCOPE(rootLimits,Switch2ExplorationProfile::Kind::VmRootConfig,"engine-limits");
 
   m_luaEngine->setRecursionLimit(root.configuration()->get("scriptRecursionLimit").toUInt());
   m_luaEngine->setInstructionLimit(root.configuration()->get("scriptInstructionLimit").toUInt());
@@ -55,7 +67,8 @@ void LuaRoot::restart() {
 }
 
 void LuaRoot::shutdown() {
-  clearScriptCache();
+  // Per-root teardown must not discard the statistics-owned serialized store.
+  m_scriptCache->clear();
 
   if (!m_luaEngine)
     return;
@@ -169,6 +182,7 @@ size_t LuaRoot::scriptCacheMemoryUsage() const {
 }
 
 void LuaRoot::clearScriptCache() const {
+  if(m_scriptCache->sharedBytecode)m_scriptCache->sharedBytecode->clear();
   return m_scriptCache->clear();
 }
 
@@ -183,7 +197,22 @@ LuaEngine& LuaRoot::luaEngine() const {
 void LuaRoot::ScriptCache::loadScript(LuaEngine& engine, String const& assetPath) {
   auto assets = Root::singleton().assets();
   RecursiveMutexLocker locker(mutex);
-  scripts[assetPath] = engine.compile(*assets->bytes(assetPath), assetPath);
+  if(sharedBytecode) {
+    STAR_EXPLORATION_SCOPE(lookupTrace,Switch2ExplorationProfile::Kind::StatsBytecodeLookup,assetPath.utf8Ptr());
+    auto source=assets->bytes(assetPath);
+    auto result=sharedBytecode->get(sharedKey(assetPath),source,[&](ByteArray const& bytes) {
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsBytecodeMiss);
+      STAR_EXPLORATION_SCOPE(compileTrace,Switch2ExplorationProfile::Kind::StatsCompile,assetPath.utf8Ptr(),bytes.size());
+      return engine.compile(bytes,assetPath);
+    });
+    if(result.hit)STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsBytecodeHit);
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsBytecodeEvict,result.evicted);
+    Switch2IoProfile::cache(result.hit ? Switch2IoProfile::Cache::ScriptHit : Switch2IoProfile::Cache::ScriptMiss);
+    scripts[assetPath]=*result.code;
+  } else {
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::ScriptMiss);
+    scripts[assetPath] = engine.compile(*assets->bytes(assetPath), assetPath);
+  }
 }
 
 bool LuaRoot::ScriptCache::scriptLoaded(String const& assetPath) const {
@@ -193,6 +222,7 @@ bool LuaRoot::ScriptCache::scriptLoaded(String const& assetPath) const {
 
 void LuaRoot::ScriptCache::unloadScript(String const& assetPath) {
   RecursiveMutexLocker locker(mutex);
+  if(sharedBytecode)sharedBytecode->erase(sharedKey(assetPath));
   scripts.remove(assetPath);
 }
 
@@ -206,7 +236,12 @@ void LuaRoot::ScriptCache::loadContextScript(LuaContext& context, String const& 
   RecursiveMutexLocker locker(mutex);
   if (!scriptLoaded(assetPath))
     loadScript(context.engine(), assetPath);
-  context.load(scripts.get(assetPath));
+  else
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::ScriptHit);
+  if(sharedBytecode) {
+    STAR_EXPLORATION_SCOPE(loadTrace,Switch2ExplorationProfile::Kind::StatsBytecodeLoad,assetPath.utf8Ptr());
+    context.load(scripts.get(assetPath));
+  } else context.load(scripts.get(assetPath));
 }
 
 size_t LuaRoot::ScriptCache::memoryUsage() const {

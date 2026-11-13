@@ -2,6 +2,7 @@
 
 #define LUA_LIB
 #include "lualib.h"
+#include "StarBootstrapBytecode.hpp"
 
 static const luaL_Reg funcs[] = {
   {nullptr, nullptr}
@@ -99,9 +100,13 @@ return class
         end
     end
 end)EOC";
+#ifdef STAR_PLUTO_BOOTSTRAP_CACHE
+    return StarPlutoBootstrap::open(L, StarPlutoBootstrap::Library::Scheduler, code, strlen(code), "pluto:scheduler");
+#else
     luaL_loadbuffer(L, code, strlen(code), "pluto:scheduler");
     lua_call(L, 0, 1);
     return 1;
+#endif
 #endif
 }
 

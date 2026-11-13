@@ -1,4 +1,6 @@
 #include "StarChat.hpp"
+#include "StarPersistedSnapshot.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarButtonWidget.hpp"
 #include "StarCanvasWidget.hpp"
@@ -367,14 +369,22 @@ void Chat::saveMessages() {
   auto messagesFile = root->toStoragePath("messages.json");
   try {
     JsonArray messagesToSave{};
-    for (auto message : m_receivedMessages) {
+    for (auto const& message : m_receivedMessages) {
       messagesToSave.append(JsonObject{
           {"mode", MessageContextModeNames.valueRight(message.mode, "Local")},
           {"portrait", message.portrait},
           {"text", message.text}});
     }
     messagesToSave.reverse();
+#ifdef STAR_SYSTEM_SWITCH2
+    bool wrote=persistChanged(m_persistedMessages,messagesToSave,[&]{return File::isFile(messagesFile);},[&](JsonArray const& value) {
+      File::writeFile(Json(value).printJson(2),messagesFile);
+    });
+    if(wrote) {STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::ChatWritten);}
+    else {STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::ChatSkipped);}
+#else
     File::writeFile(Json(messagesToSave).printJson(2), messagesFile);
+#endif
     // Logger::info("Saved chat messages to '{}'", messagesFile);
   } catch (std::exception const& e) {
     Logger::error("Exception while saving chat messages to '{}': {}", messagesFile, e.what());

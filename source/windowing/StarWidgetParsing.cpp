@@ -1,4 +1,5 @@
 #include "StarWidgetParsing.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarButtonGroup.hpp"
 #include "StarButtonWidget.hpp"
@@ -50,6 +51,7 @@ WidgetParser::WidgetParser() {
 }
 
 void WidgetParser::construct(Json const& config, Widget* widget) {
+  STAR_EXPLORATION_SCOPE(treeTrace,Switch2ExplorationProfile::Kind::UiWidgetTree);
   m_pane = dynamic_cast<Pane*>(widget);
   constructImpl(config, widget);
 }
@@ -78,6 +80,8 @@ WidgetPtr WidgetParser::makeSingle(String const& name, Json const& config) {
     throw WidgetParserException(strf("Unknown type in gui json. {}", config.getString("type")));
   }
 
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::UiWidgets);
+  STAR_EXPLORATION_SCOPE(widgetTrace,Switch2ExplorationProfile::Kind::UiWidgetBuild,"single-widget");
   auto constructResult = m_constructors.get(config.getString("type"))(name, config);
   return constructResult.obj;
 }
@@ -90,6 +94,8 @@ List<WidgetConstructResult> WidgetParser::constructor(Json const& config) {
       throw WidgetParserException(
           "Malformed gui json: member configuration is either not a map, or does not specify a widget name and type");
     String type = memberConfig.getString("type");
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::UiWidgets);
+    STAR_EXPLORATION_SCOPE(widgetTrace,Switch2ExplorationProfile::Kind::UiWidgetBuild,type.utf8Ptr());
     if (type == "include") {
       widgets.appendAll(constructor(Root::singleton().assets()->json(memberConfig.getString("file"))));
     } else {

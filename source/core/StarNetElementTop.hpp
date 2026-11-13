@@ -2,6 +2,7 @@
 #define STAR_NET_ELEMENT_TOP_HPP
 
 #include "StarNetElement.hpp"
+#include "StarDataStreamDevices.hpp"
 
 namespace Star {
 
@@ -43,21 +44,23 @@ NetElementTop<BaseNetElement>::NetElementTop() {
 
 template <typename BaseNetElement>
 pair<ByteArray, uint64_t> NetElementTop<BaseNetElement>::writeNetState(uint64_t fromVersion) {
+  // The stream cannot escape this call. An empty-owner alias gives the existing
+  // IODevice stream a stack Buffer without allocating a shared control block.
+  Buffer buffer;
+  DataStreamIODevice ds(IODevicePtr(IODevicePtr{}, &buffer));
   if (fromVersion == 0) {
-    DataStreamBuffer ds;
     ds.write<bool>(true);
     BaseNetElement::netStore(ds);
     m_netVersion.increment();
-    return {ds.takeData(), m_netVersion.current()};
+    return {buffer.takeData(), m_netVersion.current()};
 
   } else {
-    DataStreamBuffer ds;
     ds.write<bool>(false);
     if (!BaseNetElement::writeNetDelta(ds, fromVersion)) {
       return {ByteArray(), m_netVersion.current()};
     } else {
       m_netVersion.increment();
-      return {ds.takeData(), m_netVersion.current()};
+      return {buffer.takeData(), m_netVersion.current()};
     }
   }
 }
@@ -68,7 +71,8 @@ void NetElementTop<BaseNetElement>::readNetState(ByteArray data, float interpola
     BaseNetElement::blankNetDelta(interpolationTime);
 
   } else {
-    DataStreamBuffer ds(std::move(data));
+    Buffer buffer(std::move(data));
+    DataStreamIODevice ds(IODevicePtr(IODevicePtr{}, &buffer));
 
     if (ds.read<bool>())
       BaseNetElement::netLoad(ds);

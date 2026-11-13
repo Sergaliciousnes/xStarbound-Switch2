@@ -25,6 +25,15 @@ STAR_CLASS(Npc);
 
 STAR_CLASS(ArmorWearer);
 
+// One bounded entry; compare every input used by directive substitution tags.
+class HumanoidIdentityTagCache {
+public:
+  StringMap<String> const& get(HumanoidIdentity const& identity);
+private:
+  Maybe<HumanoidIdentity> m_identity;
+  StringMap<String> m_tags;
+};
+
 class ArmorWearer : public NetElementSyncGroup {
 public:
   ArmorWearer();
@@ -80,6 +89,8 @@ public:
 private:
   void netElementsNeedLoad(bool full) override;
   void netElementsNeedStore() override;
+
+  HumanoidIdentityTagCache m_identityTags, m_visualIdentityTags, m_netIdentityTags;
 
   HeadArmorPtr m_headItem;
   ChestArmorPtr m_chestItem;

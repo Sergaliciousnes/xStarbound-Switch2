@@ -193,9 +193,20 @@ void Logger::error(char const* msg, Args const&... args) {
 
 template <typename T>
 void LogMap::set(String const& key, T const& t) {
+#ifndef STAR_DISABLE_DEBUG_HUD
   setValue(key, toString(t));
+#endif
 }
 
 }
+
+#ifdef STAR_DISABLE_DEBUG_HUD
+// Drop arguments too: formatting/debug geometry must not run in a clean build.
+#define STAR_LOG_MAP_SET(...) ((void)0)
+#define STAR_SPATIAL_LOG(...) ((void)0)
+#else
+#define STAR_LOG_MAP_SET(...) ::Star::LogMap::set(__VA_ARGS__)
+#define STAR_SPATIAL_LOG(method, ...) ::Star::SpatialLogger::method(__VA_ARGS__)
+#endif
 
 #endif

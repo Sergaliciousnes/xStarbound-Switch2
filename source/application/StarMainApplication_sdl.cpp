@@ -1,14 +1,36 @@
+#include "StarSwitch2WaitProfile.hpp"
+#include "StarSwitch2IoProfile.hpp"
+#include "StarSwitch2AllocationProfile.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarSwitch2SimulationProfile.hpp"
+#ifdef STAR_SWITCH2_GAME_RPMALLOC
+#include "StarSwitch2GameAllocator.hpp"
+#endif
 #include "StarMainApplication.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarLogging.hpp"
 #include "StarSignalHandler.hpp"
 #include "StarTickRateMonitor.hpp"
-#include "StarRenderer_opengl20.hpp"
+#include "StarSdlRenderBackend.hpp"
+#ifdef STAR_ENABLE_VULKAN
+#include "StarVulkanDiagnostic.hpp"
+#endif
 #include "StarTtlCache.hpp"
 #include "StarImage.hpp"
 #include "StarImageProcessing.hpp"
+#include "StarSwitch2Diagnostics.hpp"
 
 #include "SDL.h"
 #include "StarPlatformServices_pc.hpp"
+
+#ifdef __SWITCH2__
+#include "StarSwitch2Controls.hpp"
+#include <switch.h>
+#include <cstdio>
+#include <unistd.h>
+#include <cerrno>
+#include <cstring>
+#endif
 
 // Necessary includes for Windows stuff.
 #ifdef STAR_SYSTEM_WINDOWS
@@ -22,6 +44,15 @@
 #endif
 
 namespace Star {
+
+#ifdef __SWITCH2__
+// VI scales the buffer to the display. Keep the client buffer and UI at the
+// same 16:9 size instead of applying desktop windowed resolutions.
+#ifndef STAR_SWITCH2_RENDER_HEIGHT
+#define STAR_SWITCH2_RENDER_HEIGHT 720
+#endif
+Vec2U const Switch2RenderSize{STAR_SWITCH2_RENDER_HEIGHT * 16 / 9, STAR_SWITCH2_RENDER_HEIGHT};
+#endif
 
 Maybe<Key> keyFromSdlKeyCode(SDL_Keycode sym) {
   static HashMap<int, Key> KeyCodeMap{
@@ -221,7 +252,7 @@ ControllerButton controllerButtonFromSdlControllerButton(uint8_t button) {
 
 class SdlPlatform {
 public:
-  SdlPlatform(ApplicationUPtr application, StringList cmdLineArgs) {
+  SdlPlatform(ApplicationUPtr application, StringList cmdLineArgs, bool vulkanMenus, bool vulkanGameplay) {
     m_application = std::move(application);
 
     // extract application path from command line args
@@ -241,10 +272,12 @@ public:
     if (SDL_Init(0))
       throw ApplicationException(strf("Couldn't initialize SDL: {}", SDL_GetError()));
 
+#ifndef __SWITCH2__
     if (char* basePath = SDL_GetBasePath()) {
       File::changeDirectory(basePath);
       SDL_free(basePath);
     }
+#endif
 
     m_signalHandler.setHandleInterrupt(true);
     m_signalHandler.setHandleFatal(true);
@@ -261,8 +294,19 @@ public:
       throw ApplicationException(strf("Couldn't initialize SDL Video: {}", SDL_GetError()));
 
     Logger::info("Application: Initializing SDL Controller");
+#ifdef __SWITCH2__
+    padConfigureInput(1, HidNpadStyleSet_NpadStandard);
+    padInitializeDefault(&m_switchPad);
+    hidInitializeTouchScreen();
+    // Native HID supplies controller/touch input. Do not also synthesize SDL
+    // touch-mouse events or open all eight virtual controller slots.
+    SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+    SDL_SetHint(SDL_HINT_MOUSE_TOUCH_EVENTS, "0");
+    Logger::info("Switch 2 controls: left stick/D-pad WASD; right stick/touch cursor; ZR/tap left click; ZL right click; Y interact (E), hold >2s Left Alt; B ability (F); L/R hotbar; A jump; X Escape; Minus chat");
+#else
     if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER))
       throw ApplicationException(strf("Couldn't initialize SDL Controller: {}", SDL_GetError()));
+#endif
 
 #ifdef STAR_SYSTEM_WINDOWS // Newer SDL is defaulting to xaudio2, which does not support audio capture
     SDL_setenv("SDL_AUDIODRIVER", "directsound", 1);
@@ -281,8 +325,14 @@ public:
       Logger::info("Application: No platform services available");
 
     Logger::info("Application: Creating SDL Window");
+    m_renderBackend = createSdlRenderBackend(vulkanMenus, vulkanGameplay);
+#ifdef __SWITCH2__
+    Uint32 windowFlags = m_renderBackend->windowFlags() | SDL_WINDOW_BORDERLESS;
+#else
+    Uint32 windowFlags = m_renderBackend->windowFlags() | SDL_WINDOW_RESIZABLE;
+#endif
     m_sdlWindow = SDL_CreateWindow(m_windowTitle.utf8Ptr(), SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
-        m_windowSize[0], m_windowSize[1], SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        m_windowSize[0], m_windowSize[1], windowFlags);
     if (!m_sdlWindow)
       throw ApplicationException::format("Application: Could not create SDL window: {}", SDL_GetError());
 
@@ -314,13 +364,21 @@ public:
     int width;
     int height;
     SDL_GetWindowSize(m_sdlWindow, &width, &height);
+#ifdef __SWITCH2__
+    m_windowSize = Switch2RenderSize;
+    m_switchControls.setCursor(m_windowSize[0] * 0.5f, m_windowSize[1] * 0.5f);
+    // Configure VI before Vulkan registers swapchain buffers. This operation
+    // must not be used to resize an already-active swapchain.
+    Result sizeResult = nwindowSetDimensions(nwindowGetDefault(), m_windowSize[0], m_windowSize[1]);
+    if (R_FAILED(sizeResult))
+      throw ApplicationException::format("Could not configure VI render size: 0x{:08x}", sizeResult);
+    Logger::info("Switch 2: fixed render size {}x{} (SDL reported {}x{})", m_windowSize[0], m_windowSize[1], width, height);
+#else
     m_windowSize = Vec2U(width, height);
+#endif
 
-    m_sdlGlContext = SDL_GL_CreateContext(m_sdlWindow);
-    if (!m_sdlGlContext)
-      throw ApplicationException::format("Application: Could not create OpenGL context: {}", SDL_GetError());
-
-    SDL_GL_SwapWindow(m_sdlWindow);
+    m_renderBackend->initialize(m_sdlWindow);
+    m_renderBackend->present();
     setVSyncEnabled(m_windowVSync);
 
     SDL_StopTextInput();
@@ -347,7 +405,7 @@ public:
       SDL_PauseAudioDevice(m_sdlAudioOutputDevice, 0);
     }
 
-    m_renderer = make_shared<OpenGl20Renderer>();
+    m_renderer = m_renderBackend->createRenderer();
     m_renderer->setScreenSize(m_windowSize);
 
     m_cursorCache.setTimeToLive(30000);
@@ -360,7 +418,11 @@ public:
 
     closeAudioInputDevice();
 
+    // Release application-owned textures and buffers while the context is live,
+    // including when run() did not reach its normal cleanup path.
+    m_application.reset();
     m_renderer.reset();
+    m_renderBackend.reset();
 
     Logger::info("Application: Destroying SDL Window");
     SDL_DestroyWindow(m_sdlWindow);
@@ -422,9 +484,28 @@ public:
 
       m_updateTicker.reset();
       m_renderTicker.reset();
+#ifdef STAR_SYSTEM_SWITCH2
+      Switch2FrameProfile::meter.reset(Switch2FrameProfile::nowUs());
+#endif
 
+#ifdef STAR_SWITCH2_WAIT_PROFILE
+      Switch2WaitProfile::start();
+      Switch2SimulationProfile::start();
+      Logger::info("Switch 2 wait profile: buffered in RAM; detailed frames 1/8; writes sdmc:/xstarbound-waits.log on normal exit");
+#ifdef STAR_SWITCH2_IO_PROFILE
+      Logger::info("Switch 2 I/O profile: all-thread File counts/times, script and block cache counters; buffered until exit; sdmc:/xstarbound-io.log");
+#endif
+#endif
       bool quit = false;
       while (true) {
+        Switch2WaitProfile::Frame waitFrame;
+        Switch2WaitProfile::Scope eventScope(Switch2WaitProfile::Metric::Events);
+#ifdef STAR_SYSTEM_SWITCH2
+        Switch2FrameProfile::begin();
+#endif
+#ifdef __SWITCH2__
+        if (!appletMainLoop()) break;
+#endif
 #if defined TRACY_ENABLE
         FrameMarkStart("SDL cursor cache cleanup");
 #endif
@@ -436,6 +517,7 @@ public:
 #if defined TRACY_ENABLE
         FrameMarkStart("Input processing");
 #endif
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "input");
         for (auto const& event : processEvents())
           m_application->processInput(event);
 #if defined TRACY_ENABLE
@@ -459,9 +541,14 @@ public:
 #if defined TRACY_ENABLE
         FrameMarkStart("Game update loops");
 #endif
+        eventScope.stop();
         int updatesBehind = max<int>(round(m_updateTicker.ticksBehind()), 1);
         updatesBehind = min<int>(updatesBehind, m_maxFrameSkip + 1);
         for (int i = 0; i < updatesBehind; ++i) {
+          Switch2FrameProfile::Zone updateZone(Switch2FrameProfile::Phase::Update);
+          Switch2FrameProfile::count(Switch2FrameProfile::Counter::Updates, 1);
+          Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "application update");
+          Switch2WaitProfile::Scope updateWaits(Switch2WaitProfile::Metric::Update);
           m_application->update();
           m_updateRate = m_updateTicker.tick();
         }
@@ -472,11 +559,31 @@ public:
 #if defined TRACY_ENABLE
         FrameMarkStart("Rendering");
 #endif
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "start frame");
         m_renderer->startFrame();
-        m_application->render();
-        m_renderer->finishFrame();
-        SDL_GL_SwapWindow(m_sdlWindow);
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "application render");
+        {
+          Switch2WaitProfile::Scope renderWaits(Switch2WaitProfile::Metric::Render);
+          m_application->render();
+        }
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "finish frame");
+        {
+          Switch2FrameProfile::Zone finishZone(Switch2FrameProfile::Phase::Finish);
+          Switch2WaitProfile::Scope finishWaits(Switch2WaitProfile::Metric::Finish);
+          m_renderer->finishFrame();
+        }
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "present");
+        {
+          Switch2WaitProfile::Scope presentWaits(Switch2WaitProfile::Metric::Present);
+          m_renderBackend->present();
+        }
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "frame complete / idle");
+#ifdef STAR_SYSTEM_SWITCH2
+        Switch2FrameProfile::complete();
+        m_renderRate = Switch2FrameProfile::meter.fps();
+#else
         m_renderRate = m_renderTicker.tick();
+#endif
 #if defined TRACY_ENABLE
         FrameMarkEnd("Rendering");
         FrameMark;
@@ -501,8 +608,10 @@ public:
         FrameMarkStart("Free wait time");
 #endif
         int64_t spareMilliseconds = round(m_updateTicker.spareTime() * 1000);
-        if (spareMilliseconds > 0)
+        if (spareMilliseconds > 0) {
+          Switch2WaitProfile::Scope pacingWait(Switch2WaitProfile::Metric::Pacing);
           Thread::sleepPrecise(spareMilliseconds);
+        }
 #if defined TRACY_ENABLE
         FrameMarkEnd("Free wait time");
 #endif
@@ -511,6 +620,61 @@ public:
       Logger::error("Application: exception thrown, shutting down: {}", outputException(e, true));
     }
 
+    Switch2WaitProfile::finishFrames();
+#ifdef STAR_SWITCH2_EXPLORATION_PROFILE
+    if(Switch2SimulationProfile::dump("sdmc:/xstarbound-simulation.log"))
+      Logger::info("Switch 2 simulation profile: saved sdmc:/xstarbound-simulation.log");
+    else if(Switch2SimulationProfile::dump("sdmc:/switch/xstarbound/storage/xstarbound-simulation.log"))
+      Logger::info("Switch 2 simulation profile: saved storage fallback");
+    else Logger::warn("Switch 2 simulation profile: writes failed, errno {}",errno);
+    if(Switch2ExplorationProfile::dump("sdmc:/xstarbound-exploration.log"))
+      Logger::info("Switch 2 exploration profile: saved sdmc:/xstarbound-exploration.log");
+    else if(Switch2ExplorationProfile::dump("sdmc:/switch/xstarbound/storage/xstarbound-exploration.log"))
+      Logger::info("Switch 2 exploration profile: saved storage fallback");
+    else Logger::warn("Switch 2 exploration profile: writes failed, errno {}",errno);
+#endif
+#ifdef STAR_SWITCH2_RESOURCE_REPORTS
+    Switch2GameAllocator::report(stdout,"before-teardown");
+    Switch2GameAllocator::reportFile("before-teardown",true);
+#endif
+#ifdef STAR_SWITCH2_ALLOCATION_PROFILE
+    if (Switch2AllocationProfile::dump("sdmc:/xstarbound-allocations.log")) {
+      Logger::info("Switch 2 allocation callers: saved sdmc:/xstarbound-allocations.log");
+    } else if (Switch2AllocationProfile::dump("sdmc:/switch/xstarbound/storage/xstarbound-allocations.log")) {
+      Logger::info("Switch 2 allocation callers: saved storage fallback");
+    } else {
+      Logger::warn("Switch 2 allocation callers: report writes failed, errno {}",errno);
+    }
+#endif
+#ifdef STAR_SWITCH2_IO_PROFILE
+    Logger::info("Switch 2 I/O profile: saving buffered capture before teardown");
+    if (Switch2IoProfile::dump("sdmc:/xstarbound-io.log")) {
+      Logger::info("Switch 2 I/O profile: saved sdmc:/xstarbound-io.log");
+    } else if (Switch2IoProfile::dump("sdmc:/switch/xstarbound/storage/xstarbound-io.log")) {
+      Logger::info("Switch 2 I/O profile: saved storage fallback xstarbound-io.log");
+    } else {
+      Logger::warn("Switch 2 I/O profile: both writes failed, errno {} ({})", errno, std::strerror(errno));
+    }
+#endif
+#ifdef STAR_SWITCH2_WAIT_PROFILE
+    // Save while the SD mount and application are still alive. Root teardown
+    // can stall or terminate before code after m_application.reset() is reached.
+    Logger::info("Switch 2 wait profile: saving before application teardown");
+    char const* reportPath = "sdmc:/xstarbound-waits.log";
+    if (Switch2WaitProfile::dump(reportPath)) {
+      Logger::info("Switch 2 wait profile: saved {}", reportPath);
+    } else {
+      int reportError = errno;
+      Logger::warn("Switch 2 wait profile: could not write {}: errno {} ({})", reportPath, reportError, std::strerror(reportError));
+      reportPath = "sdmc:/switch/xstarbound/storage/xstarbound-waits.log";
+      if (Switch2WaitProfile::dump(reportPath)) {
+        Logger::info("Switch 2 wait profile: saved fallback {}", reportPath);
+      } else {
+        reportError = errno;
+        Logger::warn("Switch 2 wait profile: fallback write failed {}: errno {} ({})", reportPath, reportError, std::strerror(reportError));
+      }
+    }
+#endif
     try {
       Logger::info("Application: shutdown...");
       m_application->shutdown();
@@ -572,6 +736,10 @@ private:
     }
 
     void setFullscreenWindow(Vec2U fullScreenResolution) override {
+#ifdef __SWITCH2__
+      setConsoleWindow();
+      return;
+#endif
       if (parent->m_windowMode != WindowMode::Fullscreen || parent->m_windowSize != fullScreenResolution) {
         SDL_DisplayMode requestedDisplayMode = {SDL_PIXELFORMAT_RGB888, (int)fullScreenResolution[0], (int)fullScreenResolution[1], 0, 0};
         int currentDisplayIndex = SDL_GetWindowDisplayIndex(parent->m_sdlWindow);
@@ -609,6 +777,10 @@ private:
     }
 
     void setNormalWindow(Vec2U windowSize) override {
+#ifdef __SWITCH2__
+      setConsoleWindow();
+      return;
+#endif
       auto window = parent->m_sdlWindow;
       if (parent->m_windowMode != WindowMode::Normal || parent->m_windowSize != windowSize) {
         if (parent->m_windowMode == WindowMode::Fullscreen)
@@ -628,6 +800,10 @@ private:
     }
 
     void setMaximizedWindow() override {
+#ifdef __SWITCH2__
+      setConsoleWindow();
+      return;
+#endif
       if (parent->m_windowMode != WindowMode::Maximized) {
         if (parent->m_windowMode == WindowMode::Fullscreen)
           SDL_SetWindowFullscreen(parent->m_sdlWindow, 0);
@@ -641,6 +817,10 @@ private:
     }
 
     void setBorderlessWindow() override {
+#ifdef __SWITCH2__
+      setConsoleWindow();
+      return;
+#endif
       if (parent->m_windowMode != WindowMode::Borderless) {
         if (parent->m_windowMode == WindowMode::Fullscreen)
           SDL_SetWindowFullscreen(parent->m_sdlWindow, 0);
@@ -671,6 +851,17 @@ private:
       }
     }
 
+#ifdef __SWITCH2__
+    void setConsoleWindow() {
+      if (parent->m_windowMode == WindowMode::Borderless && parent->m_windowSize == Switch2RenderSize)
+        return;
+      parent->m_windowMode = WindowMode::Borderless;
+      parent->m_windowSize = Switch2RenderSize;
+      parent->m_renderer->setScreenSize(parent->m_windowSize);
+      parent->m_application->windowChanged(parent->m_windowMode, parent->m_windowSize);
+    }
+#endif
+
     void setMaxFrameSkip(unsigned maxFrameSkip) override {
       parent->m_maxFrameSkip = maxFrameSkip;
     }
@@ -685,14 +876,46 @@ private:
 
     void setAcceptingTextInput(bool acceptingTextInput) override {
       if (acceptingTextInput != parent->m_acceptingTextInput) {
+#ifndef __SWITCH2__
         if (acceptingTextInput)
           SDL_StartTextInput();
         else
           SDL_StopTextInput();
+#endif
 
         parent->m_acceptingTextInput = acceptingTextInput;
       }
     }
+
+#ifdef __SWITCH2__
+    Maybe<String> editText(String const& initial, bool hidden) override {
+      SwkbdConfig keyboard{};
+      Result result = swkbdCreate(&keyboard, 0);
+      if (R_FAILED(result)) {
+        Logger::warn("Switch 2 keyboard creation failed: 0x{:08x}", result);
+        return {};
+      }
+      struct CloseKeyboard { SwkbdConfig* config; ~CloseKeyboard(){if(config)swkbdClose(config);} } close{&keyboard};
+      if(hidden)swkbdConfigMakePresetPassword(&keyboard);
+      else swkbdConfigMakePresetDefault(&keyboard);
+      swkbdConfigSetInitialText(&keyboard, initial.utf8Ptr());
+      swkbdConfigSetStringLenMax(&keyboard, 500);
+      char output[4096]{};
+      Logger::info("Switch 2 keyboard: opening explicit text editor");
+      result = swkbdShow(&keyboard, output, sizeof(output));
+      // Close the applet's resources before returning to game rendering, also
+      // on Cancel. Do not use SDL's automatic/inline keyboard path here.
+      swkbdClose(&keyboard); close.config=nullptr;
+      padUpdate(&parent->m_switchPad);
+      parent->m_switchBlockedButtons = padGetButtons(&parent->m_switchPad);
+      parent->m_switchControls.suspend();
+      parent->m_switchInputTicks=SDL_GetTicks();
+      parent->m_switchFocused=appletGetFocusState()==AppletFocusState_InFocus;
+      Logger::info("Switch 2 keyboard: closed, result 0x{:08x}", result);
+      if (R_FAILED(result))return {};
+      return String(output);
+    }
+#endif
 
     AudioFormat enableAudio() override {
       parent->m_audioEnabled = true;
@@ -760,7 +983,14 @@ private:
       Maybe<InputEvent> starEvent;
       switch (event.type) {
       case SDL_WINDOWEVENT:
+#ifdef __SWITCH2__
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) m_switchFocused = false;
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) m_switchFocused = true;
+#endif
         if (event.window.event == SDL_WINDOWEVENT_MAXIMIZED || event.window.event == SDL_WINDOWEVENT_RESTORED) {
+#ifdef __SWITCH2__
+          m_windowMode = WindowMode::Borderless;
+#else
           auto windowFlags = SDL_GetWindowFlags(m_sdlWindow);
 
           if (windowFlags & SDL_WINDOW_MAXIMIZED)
@@ -771,11 +1001,17 @@ private:
             m_windowMode = WindowMode::Borderless;
           else
             m_windowMode = WindowMode::Normal;
+#endif
 
           m_application->windowChanged(m_windowMode, m_windowSize);
 
         } else if (event.window.event == SDL_WINDOWEVENT_RESIZED || event.window.event == SDL_WINDOWEVENT_SIZE_CHANGED) {
+#ifdef __SWITCH2__
+          // Desktop-size notifications must not replace the console UI size.
+          m_windowSize = Switch2RenderSize;
+#else
           m_windowSize = Vec2U(event.window.data1, event.window.data2);
+#endif
           m_renderer->setScreenSize(m_windowSize);
           m_application->windowChanged(m_windowMode, m_windowSize);
         }
@@ -794,14 +1030,24 @@ private:
         starEvent.set(TextInputEvent{String(event.text.text)});
         break;
       case SDL_MOUSEMOTION:
+#ifdef __SWITCH2__
+        if (event.motion.which == SDL_TOUCH_MOUSEID) break;
+        m_switchControls.setCursor(event.motion.x, (int)m_windowSize[1] - event.motion.y);
+#endif
         starEvent.set(MouseMoveEvent{
             {event.motion.xrel, -event.motion.yrel}, {event.motion.x, (int)m_windowSize[1] - event.motion.y}});
         break;
       case SDL_MOUSEBUTTONDOWN:
+#ifdef __SWITCH2__
+        if (event.button.which == SDL_TOUCH_MOUSEID) break;
+#endif
         starEvent.set(MouseButtonDownEvent{mouseButtonFromSdlMouseButton(event.button.button),
             {event.button.x, (int)m_windowSize[1] - event.button.y}});
         break;
       case SDL_MOUSEBUTTONUP:
+#ifdef __SWITCH2__
+        if (event.button.which == SDL_TOUCH_MOUSEID) break;
+#endif
         starEvent.set(MouseButtonUpEvent{mouseButtonFromSdlMouseButton(event.button.button),
             {event.button.x, (int)m_windowSize[1] - event.button.y}});
         break;
@@ -810,6 +1056,7 @@ private:
         SDL_GetMouseState(&x, &y);
         starEvent.set(MouseWheelEvent{event.wheel.y < 0 ? MouseWheel::Down : MouseWheel::Up, {x, (int)m_windowSize[1] - y}});
         break;
+#ifndef __SWITCH2__
       case SDL_CONTROLLERAXISMOTION:
         starEvent.set(ControllerAxisEvent{
           (ControllerId)event.caxis.which,
@@ -840,6 +1087,7 @@ private:
           }
         }
         break;
+#endif
       case SDL_QUIT:
         m_quitRequested = true;
         starEvent.reset();
@@ -850,8 +1098,100 @@ private:
         inputEvents.append(starEvent.take());
     }
 
+#ifdef __SWITCH2__
+    appendSwitch2Input(inputEvents);
+#endif
     return inputEvents;
   }
+
+#ifdef __SWITCH2__
+  void appendSwitch2Input(List<InputEvent>& events) {
+    padUpdate(&m_switchPad);
+    auto rawButtons = padGetButtons(&m_switchPad);
+    m_switchBlockedButtons &= rawButtons;
+    auto buttons = rawButtons & ~m_switchBlockedButtons;
+    auto left = padGetStickPos(&m_switchPad, 0);
+    auto right = padGetStickPos(&m_switchPad, 1);
+    Switch2Controls::Sample sample;
+    sample.focused = m_switchFocused && appletGetFocusState() == AppletFocusState_InFocus;
+    sample.connected = padIsConnected(&m_switchPad);
+    sample.leftX = left.x / 32768.0f;
+    sample.leftY = left.y / 32768.0f;
+    sample.rightX = right.x / 32768.0f;
+    sample.rightY = right.y / 32768.0f;
+    sample.jump = (buttons & HidNpadButton_A) != 0;
+    sample.pause = (buttons & HidNpadButton_X) != 0;
+    sample.primary = (buttons & HidNpadButton_ZR) != 0;
+    sample.secondary = (buttons & HidNpadButton_ZL) != 0;
+    sample.interact = (buttons & HidNpadButton_Y) != 0;
+    sample.ability = (buttons & HidNpadButton_B) != 0;
+    sample.chat = (buttons & HidNpadButton_Minus) != 0;
+    sample.dpadLeft = (buttons & HidNpadButton_Left) != 0;
+    sample.dpadRight = (buttons & HidNpadButton_Right) != 0;
+    sample.dpadUp = (buttons & HidNpadButton_Up) != 0;
+    sample.dpadDown = (buttons & HidNpadButton_Down) != 0;
+    sample.previous = (buttons & HidNpadButton_L) != 0;
+    sample.next = (buttons & HidNpadButton_R) != 0;
+    HidTouchScreenState touch{};
+    if (hidGetTouchScreenStates(&touch, 1) && touch.count > 0) {
+      sample.touching = true;
+      sample.multipleTouches = touch.count > 1;
+      sample.touchId = touch.touches[0].finger_id;
+      // HID coordinates remain in the 1280x720 touch space. Normalize here;
+      // Switch2Controls maps them to the selected render size, including 1080p.
+      sample.touchX = touch.touches[0].x / 1279.0f;
+      sample.touchY = 1.0f - touch.touches[0].y / 719.0f;
+    }
+    Uint32 now = SDL_GetTicks();
+    float seconds = m_switchInputTicks ? (now - m_switchInputTicks) / 1000.0f : 0.0f;
+    m_switchInputTicks = now;
+    auto state = m_switchControls.update(sample, seconds, m_windowSize[0], m_windowSize[1]);
+    if (state.chatPressed) {
+      // Deliver releases before the blocking applet request. Preserve the edge
+      // latch and cursor, but do not leave movement/modifiers held in the game.
+      m_switchControls.suspend();
+      float x = state.cursorX, y = state.cursorY;
+      state = {}; state.cursorX = x; state.cursorY = y; state.chatPressed = true;
+    }
+    Vec2I position{(int)state.cursorX, (int)state.cursorY};
+    // Send position before clicks/wheel events, including the initial center.
+    if (!m_switchCursorInitialized || position != m_switchCursor) {
+      events.append(MouseMoveEvent{position - m_switchCursor, position});
+      m_switchCursor = position;
+      m_switchCursorInitialized = true;
+    }
+    KeyMod modifiers = KeyMod::NoMod;
+    if (state.alt) modifiers |= KeyMod::LAlt;
+    if (state.shift) modifiers |= KeyMod::LShift;
+    auto key = [&](bool held, bool wasHeld, Key value) {
+      if (held && !wasHeld) events.append(KeyDownEvent{value, modifiers});
+      else if (!held && wasHeld) events.append(KeyUpEvent{value});
+    };
+    // Modifier transitions precede other keys; bindings also receive the
+    // modifier bits on keys pressed while long-Y or D-pad Down is active.
+    key(state.alt, m_switchState.alt, Key::LAlt);
+    key(state.shift, m_switchState.shift, Key::LShift);
+    key(state.left, m_switchState.left, Key::A);
+    key(state.right, m_switchState.right, Key::D);
+    key(state.up, m_switchState.up, Key::W);
+    key(state.down, m_switchState.down, Key::S);
+    key(state.jump, m_switchState.jump, Key::Space);
+    key(state.pause, m_switchState.pause, Key::Escape);
+    key(state.interact, m_switchState.interact, Key::E);
+    key(state.ability, m_switchState.ability, Key::F);
+    if (state.primary && !m_switchState.primary) events.append(MouseButtonDownEvent{MouseButton::Left, position});
+    else if (!state.primary && m_switchState.primary) events.append(MouseButtonUpEvent{MouseButton::Left, position});
+    if (state.secondary && !m_switchState.secondary) events.append(MouseButtonDownEvent{MouseButton::Right, position});
+    else if (!state.secondary && m_switchState.secondary) events.append(MouseButtonUpEvent{MouseButton::Right, position});
+    if (state.previousPressed) events.append(MouseWheelEvent{MouseWheel::Up, position});
+    if (state.nextPressed) events.append(MouseWheelEvent{MouseWheel::Down, position});
+    if (state.chatPressed) {
+      events.append(ControllerButtonDownEvent{0, ControllerButton::Back});
+      events.append(ControllerButtonUpEvent{0, ControllerButton::Back});
+    }
+    m_switchState = state;
+  }
+#endif
 
   void getAudioData(Uint8* stream, int len) {
     if (m_audioEnabled) {
@@ -863,23 +1203,17 @@ private:
   }
 
   void setVSyncEnabled(bool vsyncEnabled) {
-    if (vsyncEnabled) {
-      // If VSync is requested, try for late swap tearing first, then fall back
-      // to regular VSync
-      Logger::info("Application: Enabling VSync with late swap tearing");
-      if (SDL_GL_SetSwapInterval(-1) < 0) {
-        Logger::info("Application: Enabling VSync late swap tearing failed, falling back to full VSync");
-        SDL_GL_SetSwapInterval(1);
-      }
-    } else {
-      Logger::info("Application: Disabling VSync");
-      SDL_GL_SetSwapInterval(0);
-    }
+    m_renderBackend->setVSyncEnabled(vsyncEnabled);
   }
 
   inline static constexpr size_t MaximumCursorDimensions = 128;
   inline static constexpr size_t MaximumCursorPixelCount = MaximumCursorDimensions * MaximumCursorDimensions;
   bool setCursorImage(const String& id, const ImageConstPtr& image, unsigned scale, const Vec2I& offset) {
+#ifdef __SWITCH2__
+    // Returning false selects the game's software cursor, which follows our
+    // native-HID mouse events in menus and gameplay.
+    return false;
+#endif
     auto imageSize = image->size().piecewiseMultiply(Vec2U::filled(scale));
     if (!scale || imageSize.max() > MaximumCursorDimensions || ((size_t)imageSize[0] * (size_t)imageSize[1]) > MaximumCursorPixelCount)
       return m_cursorVisible = false;
@@ -946,7 +1280,7 @@ private:
   float m_renderRate = 0.0f;
 
   SDL_Window* m_sdlWindow = nullptr;
-  SDL_GLContext m_sdlGlContext = nullptr;
+  unique_ptr<SdlRenderBackend> m_renderBackend;
   SDL_AudioDeviceID m_sdlAudioOutputDevice = 0;
   SDL_AudioDeviceID m_sdlAudioInputDevice = 0;
 
@@ -968,7 +1302,18 @@ private:
   HashTtlCache<CursorDescriptor, std::shared_ptr<CursorEntry>> m_cursorCache;
   CursorDescriptor m_currentCursor;
 
+#ifdef __SWITCH2__
+  Vec2U m_windowSize = Switch2RenderSize;
+  PadState m_switchPad{};
+  uint64_t m_switchBlockedButtons = 0;
+  Switch2Controls m_switchControls;
+  Switch2Controls::State m_switchState;
+  Vec2I m_switchCursor{640, 360};
+  Uint32 m_switchInputTicks = 0;
+  bool m_switchFocused = true, m_switchCursorInitialized = false;
+#else
   Vec2U m_windowSize = {800, 600};
+#endif
   WindowMode m_windowMode = WindowMode::Normal;
 
   String m_windowTitle = "Starbound";
@@ -979,15 +1324,76 @@ private:
   bool m_audioEnabled = false;
   bool m_quitRequested = false;
 
-  OpenGl20RendererPtr m_renderer;
+  RendererPtr m_renderer;
   ApplicationUPtr m_application;
   PcPlatformServicesUPtr m_platformServices;
 };
 
 int runMainApplication(ApplicationUPtr application, StringList cmdLineArgs) {
   try {
+#ifdef __SWITCH2__
+    std::freopen("sdmc:/xstarbound-startup.log", "w", stdout);
+    std::freopen("sdmc:/xstarbound-stderr.log", "w", stderr);
+    std::setvbuf(stdout, nullptr, _IONBF, 0);
+    std::setvbuf(stderr, nullptr, _IONBF, 0);
+#ifdef STAR_SWITCH2_RESOURCE_REPORTS
+    Switch2GameAllocator::report(stdout,"startup");
+    Switch2GameAllocator::reportFile("startup",false);
+#endif
+    Logger::refreshLoggable();
+    Logger::info("Switch 2: build profile {}", STAR_BUILD_PROFILE);
+#ifdef STAR_SWITCH2_ALLOCATION_PROFILE
+    Logger::info("Switch 2 allocation profiling: enabled (caller timings and SDK heap-lock sampling)");
+#else
+    Logger::info("Switch 2 allocation profiling: compiled out (rpmalloc ownership routing retained)");
+#endif
+#ifdef STAR_SWITCH2_DIAGNOSTICS
+    Logger::info("Switch 2 diagnostics: enabled (watchdog, CPU profiling, debug HUD)");
+#else
+    Logger::info("Switch 2 diagnostics: compiled out (FPS overlay retained)");
+#endif
+    Logger::info("Switch 2 performance: {} native sector workers; 256 MiB parallax idle cache; 32 MiB world block cache; 4096 world index nodes; FPS overlay enabled", Thread::numberOfProcessors());
+    u64 memoryLimit = 0;
+    if (R_SUCCEEDED(svcGetInfo(&memoryLimit, InfoType_TotalMemorySize, CUR_PROCESS_HANDLE, 0)))
+      Logger::info("Switch 2: process memory limit {} MiB", memoryLimit / (1024 * 1024));
+    // libounce's default homebrew startup mounts sdmc before main.
+    if (::chdir("sdmc:/switch/xstarbound") != 0)
+      throw ApplicationException::format("Could not open sdmc:/switch/xstarbound: {}", std::strerror(errno));
+#endif
+    bool vulkan = false, vulkanMenus = false, vulkanGameplay = false, opengl = false;
+    eraseWhere(cmdLineArgs, [&](String& argument) {
+      if (argument == "--renderer=vulkan") {
+        vulkan = true;
+        return true;
+      }
+      if (argument == "--renderer=vulkan-menus") {
+        vulkanMenus = true;
+        return true;
+      }
+      if (argument == "--renderer=vulkan-gameplay") {
+        vulkanGameplay = true;
+        return true;
+      }
+      if (argument == "--renderer=opengl") {
+        opengl = true;
+        return true;
+      }
+      return false;
+    });
+    if ((int)vulkan + (int)vulkanMenus + (int)vulkanGameplay + (int)opengl > 1) throw ApplicationException("Select one rendering mode");
+#ifndef STAR_ENABLE_OPENGL
+    if (opengl) throw ApplicationException("OpenGL support was not built; launch without --renderer=opengl to use Vulkan");
+    if (!vulkan && !vulkanMenus && !vulkanGameplay) vulkanGameplay = true;
+#endif
+    if (vulkan) {
+#ifdef STAR_ENABLE_VULKAN
+      return runVulkanDiagnostic(cmdLineArgs);
+#else
+      throw ApplicationException("Vulkan support was not built. Configure with -DSTAR_ENABLE_VULKAN=ON.");
+#endif
+    }
     {
-      SdlPlatform platform(std::move(application), std::move(cmdLineArgs));
+      SdlPlatform platform(std::move(application), std::move(cmdLineArgs), vulkanMenus || vulkanGameplay, vulkanGameplay);
       platform.run();
     }
     Logger::info("Application: stopped gracefully");

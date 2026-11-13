@@ -5,6 +5,7 @@
 #include "StarLruCache.hpp"
 #include "StarDataStreamDevices.hpp"
 #include "StarThread.hpp"
+#include "StarReadBlockCache.hpp"
 
 /* Added Kae's BTreeDB5 defragmenting code from OpenStarbound. */
 
@@ -43,6 +44,9 @@ public:
   // Cache size for index nodes, defaults to 64
   uint32_t indexCacheSize() const;
   void setIndexCacheSize(uint32_t indexCacheSize);
+
+  // Optional cache of committed disk blocks, in bytes. Disabled by default.
+  void setReadBlockCacheBudget(size_t bytes);
 
   // If true, every write operation will immediately result in a commit.
   // Defaults to true.
@@ -286,6 +290,7 @@ private:
   // then no other method would be loading an index anyway.
   mutable SpinLock m_indexCacheSpinLock;
   LruCache<BlockIndex, shared_ptr<IndexNode>> m_indexCache;
+  mutable ReadBlockCache m_readBlockCache;
 
   BlockIndex m_headFreeIndexBlock;
   StreamOffset m_deviceSize;

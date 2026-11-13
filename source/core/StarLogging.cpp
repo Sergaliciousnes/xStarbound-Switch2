@@ -93,23 +93,35 @@ Array<bool, 4> Logger::s_loggable = Array<bool, 4>::filled(false);
 Mutex Logger::s_mutex;
 
 String LogMap::getValue(String const& key) {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return {};
+#else
   MutexLocker locker(s_logMapMutex);
   return s_logMap.value(key);
+#endif
 }
 
 void LogMap::setValue(String const& key, String const& value) {
+#ifndef STAR_DISABLE_DEBUG_HUD
   MutexLocker locker(s_logMapMutex);
   s_logMap[key] = value;
+#endif
 }
 
 Map<String, String> LogMap::getValues() {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return {};
+#else
   MutexLocker locker(s_logMapMutex);
   return Map<String, String>::from(s_logMap);
+#endif
 }
 
 void LogMap::clear() {
+#ifndef STAR_DISABLE_DEBUG_HUD
   MutexLocker locker(s_logMapMutex);
   s_logMap.clear();
+#endif
 }
 
 HashMap<String, String> LogMap::s_logMap;
@@ -219,7 +231,11 @@ void SpatialLogger::clear() {
 }
 
 bool SpatialLogger::observed() {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return false;
+#else
   return s_observed;
+#endif
 }
 
 void SpatialLogger::setObserved(bool observed) {

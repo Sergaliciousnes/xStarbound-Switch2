@@ -2,6 +2,7 @@
 #define STAR_PLAYER_STORAGE_HPP
 
 #include "StarOrderedMap.hpp"
+#include <optional>
 #include "StarUuid.hpp"
 #include "StarPlayerFactory.hpp"
 #include "StarThread.hpp"
@@ -57,6 +58,9 @@ private:
   OrderedHashMap<Uuid, Json> m_savedPlayersCache;
   BiMap<Uuid, String> m_playerFileNames;
   JsonObject m_metadata;
+#ifdef STAR_SYSTEM_SWITCH2
+  std::optional<JsonObject> m_persistedMetadata;
+#endif
 };
 
 }

@@ -2,6 +2,7 @@
 
 #define LUA_LIB
 #include "lualib.h"
+#include "StarBootstrapBytecode.hpp"
 
 static const luaL_Reg funcs_vector3[] = {
   {nullptr, nullptr}
@@ -201,9 +202,13 @@ setmetatable(vector3, {
 })
 
 return vector3)EOC";
+#ifdef STAR_PLUTO_BOOTSTRAP_CACHE
+    return StarPlutoBootstrap::open(L, StarPlutoBootstrap::Library::Vector3, code, strlen(code), "pluto:vector3");
+#else
     luaL_loadbuffer(L, code, strlen(code), "pluto:vector3");
     lua_call(L, 0, 1);
     return 1;
+#endif
 #endif
 }
 

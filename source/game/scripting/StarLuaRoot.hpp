@@ -2,12 +2,14 @@
 #define STAR_LUA_ROOT_HPP
 
 #include "StarThread.hpp"
+#include "StarCompiledScriptCache.hpp"
 #include "StarLua.hpp"
 #include "StarRoot.hpp"
 
 namespace Star {
 
 STAR_CLASS(LuaRoot);
+using LuaBytecodeCache = CompiledScriptCache<String, ByteArray>;
 
 // Loads and caches lua scripts from assets.  Automatically clears cache on
 // root reload.  Uses an internal LuaEngine, so this and all contexts are meant
@@ -17,6 +19,7 @@ public:
   LuaRoot();
   ~LuaRoot();
 
+  void setBytecodeCache(shared_ptr<LuaBytecodeCache> cache);
   void loadScript(String const& assetPath);
   bool scriptLoaded(String const& assetPath) const;
   void unloadScript(String const& assetPath);
@@ -56,6 +59,10 @@ private:
     size_t memoryUsage() const;
 
   private:
+    friend class LuaRoot;
+    shared_ptr<LuaBytecodeCache> sharedBytecode;
+    bool safeMode = true;
+    String sharedKey(String const& path) const {return (safeMode ? String("safe:") : String("unsafe:")) + path;}
     mutable RecursiveMutex mutex;
     StringMap<ByteArray> scripts;
   };

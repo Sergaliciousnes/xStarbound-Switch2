@@ -2,7 +2,8 @@
   "name": "xstarbound",
   "version": "1.0.0",
   "default-features": [
-    "gui"
+    "gui",
+    "opengl"
   ],
   "dependencies": [
     "freetype",
@@ -13,12 +14,21 @@
     "opus"
   ],
   "features": {
+    "opengl": {
+      "description": "Build the OpenGL renderer",
+      "dependencies": ["glew"]
+    },
+    "vulkan": {
+      "description": "Enable SDL Vulkan presentation for the experimental backend",
+      "dependencies": [
+        { "name": "sdl2", "default-features": false, "features": ["vulkan"] }
+      ]
+    },
     "gui": {
       "description": "Build client GUI",
       "dependencies": [
         { "name": "sdl2", "default-features": false, "features": ["wayland", "x11", "alsa"], "platform": "linux" },
-        { "name": "sdl2", "platform": "!linux" },
-        "glew"
+        { "name": "sdl2", "default-features": false, "platform": "!linux" }
       ]
     },
     "qttools": {

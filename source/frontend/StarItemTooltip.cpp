@@ -1,4 +1,5 @@
 #include "StarItemTooltip.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarArmors.hpp"
 #include "StarAssets.hpp"
 #include "StarFireableItem.hpp"
@@ -38,6 +39,7 @@ PanePtr ItemTooltipBuilder::buildItemTooltip(ItemPtr const& item, PlayerPtr cons
     if (!tooltipKind.endsWith(".tooltip"))
       tooltipKind = "/interface/tooltips/" + tooltipKind + ".tooltip";
 
+    STAR_EXPLORATION_SCOPE(tooltipTrace,Switch2ExplorationProfile::Kind::UiTooltip,tooltipKind.utf8Ptr());
     buildItemDescriptionInner(tooltip, item, tooltipKind, title, subTitle, viewer);
 
     auto titleIcon = makeObject<ItemSlotWidget>(item, "/interface/inventory/portrait.png");

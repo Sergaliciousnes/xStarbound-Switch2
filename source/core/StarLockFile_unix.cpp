@@ -1,8 +1,13 @@
 #include "StarLockFile.hpp"
 #include "StarTime.hpp"
 #include "StarThread.hpp"
+#ifdef STAR_SYSTEM_SWITCH2
+#include "StarLogging.hpp"
+#endif
 
+#ifndef STAR_SYSTEM_SWITCH2
 #include <sys/file.h>
+#endif
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
@@ -37,6 +42,16 @@ LockFile& LockFile::operator=(LockFile&& lockFile) {
 
 bool LockFile::lock(int64_t timeout) {
   auto doFLock = [](String const& filename, bool block) -> shared_ptr<int> {
+#ifdef STAR_SYSTEM_SWITCH2
+    // The SD filesystem has no flock. An exclusive sentinel fails closed;
+    // after a crash its stale lock must be removed before reopening storage.
+    int fd = open(filename.utf8Ptr(), O_WRONLY | O_CREAT | O_EXCL, 0644);
+    if (fd < 0) {
+      if (errno == EEXIST) return {};
+      throw StarException::format("Could not create lock file {}: {}", filename, strerror(errno));
+    }
+    return make_shared<int>(fd);
+#else
     int fd = open(filename.utf8Ptr(), O_RDONLY | O_CREAT, 0644);
     if (fd < 0)
       throw StarException(strf("Could not open lock file {}, {}\n", filename, strerror(errno)));
@@ -55,10 +70,16 @@ bool LockFile::lock(int64_t timeout) {
     }
 
     return make_shared<int>(fd);
+#endif
   };
 
   if (timeout < 0) {
+#ifdef STAR_SYSTEM_SWITCH2
+    while (!(m_handle = doFLock(m_filename, false)))
+      Thread::sleep(MaximumSleepMillis);
+#else
     m_handle = doFLock(m_filename, true);
+#endif
     return true;
   } else if (timeout == 0) {
     m_handle = doFLock(m_filename, false);
@@ -81,8 +102,23 @@ bool LockFile::lock(int64_t timeout) {
 void LockFile::unlock() {
   if (m_handle) {
     int fd = *(int*)m_handle.get();
+#ifdef STAR_SYSTEM_SWITCH2
+    // The SD filesystem may reject removal while the file is open.
+    int result = close(fd);
+    int error = errno;
+    if (result == 0) {
+      result = unlink(m_filename.utf8Ptr());
+      error = errno;
+    }
+    if (result < 0 && error != ENOENT) {
+      try {
+        Logger::warn("Could not release SD lock '{}': {}. After the title exits, a stale lock may need removal.", m_filename, strerror(error));
+      } catch (...) {}
+    }
+#else
     unlink(m_filename.utf8Ptr());
     close(fd);
+#endif
     m_handle.reset();
   }
 }

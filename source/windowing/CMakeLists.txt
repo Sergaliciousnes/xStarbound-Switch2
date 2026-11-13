@@ -72,3 +72,7 @@ target_link_libraries(star_windowing
 )
 
 add_library(Star::Windowing ALIAS star_windowing)
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+  set_property(SOURCE StarPaneManager.cpp StarWidgetParsing.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()

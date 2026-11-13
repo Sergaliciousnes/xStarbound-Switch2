@@ -110,3 +110,11 @@ target_link_libraries(star_frontend
 target_precompile_headers(star_frontend REUSE_FROM star_core)
 
 add_library(Star::Frontend ALIAS star_frontend)
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+  set_property(SOURCE StarChat.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+  set_property(SOURCE StarMainInterface.cpp StarCraftingInterface.cpp StarInventory.cpp StarBaseScriptPane.cpp StarItemTooltip.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()

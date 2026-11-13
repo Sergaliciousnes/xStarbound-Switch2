@@ -11,7 +11,7 @@
 
 #if SOUP_WINDOWS
 #include <windows.h>
-#else
+#elif !defined(__SWITCH2__)
 #include <termios.h>
 #endif
 
@@ -40,7 +40,7 @@ NAMESPACE_SOUP
 		bool pressed_lmb = false;
 		bool pressed_rmb = false;
 		bool pressed_mmb = false;
-#else
+#elif !defined(__SWITCH2__)
 		inline static struct termios termattrs_og{};
 		inline static struct termios termattrs_cur{};
 #endif

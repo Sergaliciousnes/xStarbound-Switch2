@@ -1,4 +1,5 @@
 #include "StarActorMovementController.hpp"
+#include "StarSwitch2SimulationProfile.hpp"
 #include "StarDataStreamExtra.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarRoot.hpp"
@@ -1152,6 +1153,7 @@ Maybe<PlatformerAStar::Action> PathController::curAction() const {
 }
 
 Maybe<bool> PathController::findPath(ActorMovementController& movementController, Vec2F const& targetPosition) {
+  STAR_SIM_SCOPE(pathFind,Switch2SimulationProfile::Kind::PathFind);
   using namespace PlatformerAStar;
 
   // reached the end of the last path and we have a new target position to move toward
@@ -1180,7 +1182,8 @@ Maybe<bool> PathController::findPath(ActorMovementController& movementController
     return true; // Reached goal
 
   if (m_pathFinder) {
-    auto explored = m_pathFinder->explore(movementController.baseParameters().pathExploreRate.value(100.0));
+    auto explored = [&]{STAR_SIM_SCOPE(search,Switch2SimulationProfile::Kind::PathExplore);
+      return m_pathFinder->explore(movementController.baseParameters().pathExploreRate.value(100.0));}();
     if (explored) {
       auto pathfinder = m_pathFinder;
       m_pathFinder = {};
@@ -1237,7 +1240,8 @@ Maybe<bool> PathController::findPath(ActorMovementController& movementController
           // merging the paths failed, and the entity has moved from the path start position
           // try to bridge the gap from the current position to the new path
           auto bridgePathFinder = make_shared<PathFinder>(m_world, movementController.position(), *m_startPosition, movementController.baseParameters(), m_parameters);
-          auto explored = bridgePathFinder->explore(movementController.baseParameters().pathExploreRate.value(100.0));
+          auto explored = [&]{STAR_SIM_SCOPE(search,Switch2SimulationProfile::Kind::PathExplore);
+            return bridgePathFinder->explore(movementController.baseParameters().pathExploreRate.value(100.0));}();
 
           if (explored && *explored) {
             // concatenate the bridge path with the new path

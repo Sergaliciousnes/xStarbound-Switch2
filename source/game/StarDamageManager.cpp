@@ -82,9 +82,9 @@ void DamageManager::update(float dt) {
         damageSource.translate(causingEntity->position());
 
       if (auto poly = damageSource.damageArea.ptr<PolyF>())
-        SpatialLogger::logPoly("world", *poly, Color::Orange.toRgba());
+        STAR_SPATIAL_LOG(logPoly, "world", *poly, Color::Orange.toRgba());
       else if (auto line = damageSource.damageArea.ptr<Line2F>())
-        SpatialLogger::logLine("world", *line, Color::Orange.toRgba());
+        STAR_SPATIAL_LOG(logLine, "world", *line, Color::Orange.toRgba());
 
       for (auto const& hitResultPair : queryHit(damageSource, causingEntity->entityId())) {
         auto targetEntity = m_world->entity(hitResultPair.first);

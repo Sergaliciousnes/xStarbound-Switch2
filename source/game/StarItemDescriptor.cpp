@@ -5,12 +5,21 @@
 
 namespace Star {
 
-ItemDescriptor::ItemDescriptor() : m_count(0), m_parameters(JsonObject()) {}
+namespace {
+Json const& emptyItemParameters() {
+  // Json objects are immutable/shared. Empty inventory slots need a value,
+  // not a freshly allocated map on every net-state preparation pass.
+  static Json const parameters = JsonObject{};
+  return parameters;
+}
+}
+
+ItemDescriptor::ItemDescriptor() : m_count(0), m_parameters(emptyItemParameters()) {}
 
 ItemDescriptor::ItemDescriptor(String name, uint64_t count, Json parameters)
   : m_name(std::move(name)), m_count(count), m_parameters(std::move(parameters)) {
   if (m_parameters.isNull())
-    m_parameters = JsonObject();
+    m_parameters = emptyItemParameters();
   if (!m_parameters.isType(Json::Type::Object))
     throw StarException("Item parameters not map in ItemDescriptor constructor");
 }
@@ -32,9 +41,9 @@ ItemDescriptor::ItemDescriptor(Json const& spec) {
   } else if (spec.type() == Json::Type::String) {
     m_name = spec.toString();
     m_count = 1;
-    m_parameters = JsonObject();
+    m_parameters = emptyItemParameters();
   } else if (spec.isNull()) {
-    m_parameters = JsonObject();
+    m_parameters = emptyItemParameters();
     m_count = 0;
   } else {
     throw ItemException("ItemDescriptor spec variant not list, map, string, or null");

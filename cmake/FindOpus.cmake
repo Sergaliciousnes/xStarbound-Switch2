@@ -5,7 +5,7 @@ endif()
 
 if(NOT Opus_FOUND)
     find_path(Opus_INCLUDE_DIRS opus/opus.h)
-    find_library(Opus_LIBRARY ogg)
+    find_library(Opus_LIBRARY opus)
 else()
     set(Opus_LIBRARY ${pkgcfg_lib_Opus_opus})
 endif()

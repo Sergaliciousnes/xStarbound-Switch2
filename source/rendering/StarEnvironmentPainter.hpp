@@ -65,11 +65,12 @@ private:
 
   RendererPtr m_renderer;
   AssetTextureGroupPtr m_textureGroup;
+  AssetTextureGroupPtr m_parallaxTextureGroup;
 
   double m_timer;
   PerlinF m_rayPerlin;
 
-  uint64_t m_starsHash;
+  uint64_t m_starsHash = 0;
   List<TexturePtr> m_starTextures;
   shared_ptr<Random2dPointGenerator<pair<size_t, float>>> m_starGenerator;
   List<shared_ptr<Random2dPointGenerator<pair<String, float>, double>>> m_debrisGenerators;

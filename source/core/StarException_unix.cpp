@@ -2,7 +2,9 @@
 #include "StarCasting.hpp"
 #include "StarLogging.hpp"
 
+#ifndef STAR_SYSTEM_SWITCH2
 #include <execinfo.h>
+#endif
 #include <cstdlib>
 
 namespace Star {
@@ -13,12 +15,19 @@ typedef pair<Array<void*, StackLimit>, size_t> StackCapture;
 
 inline StackCapture captureStack() {
   StackCapture stackCapture;
+#ifdef STAR_SYSTEM_SWITCH2
+  stackCapture.second = 0;
+#else
   stackCapture.second = backtrace(stackCapture.first.ptr(), StackLimit);
+#endif
   return stackCapture;
 }
 
 OutputProxy outputStack(StackCapture stack) {
   return OutputProxy([stack = std::move(stack)](std::ostream & os) {
+#ifdef STAR_SYSTEM_SWITCH2
+      os << "[Stack trace unavailable on Horizon]";
+#else
       char** symbols = backtrace_symbols(stack.first.ptr(), stack.second);
       for (size_t i = 0; i < stack.second; ++i) {
         os << symbols[i];
@@ -30,6 +39,7 @@ OutputProxy outputStack(StackCapture stack) {
         os << std::endl << "[Stack Output Limit Reached]";
 
       ::free(symbols);
+#endif
     });
 }
 

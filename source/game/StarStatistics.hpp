@@ -61,6 +61,10 @@ private:
   StringSet m_achievements;
 
   LuaRootPtr m_luaRoot;
+#ifdef STAR_SYSTEM_SWITCH2
+  shared_ptr<LuaBytecodeCache> m_bytecodeCache;
+  ListenerPtr m_bytecodeReloadListener;
+#endif
 };
 
 }

@@ -1,4 +1,6 @@
 #include "StarStatistics.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include <optional>
 #include "StarConfigLuaBindings.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarLogging.hpp"
@@ -13,8 +15,27 @@
 #endif
 
 namespace Star {
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_EXPLORATION_PROFILE)
+namespace {
+thread_local char const* statisticsProfileLabel = "";
+struct StatisticsProfileContext {
+  char const* previous;
+  explicit StatisticsProfileContext(char const* label) : previous(statisticsProfileLabel) { statisticsProfileLabel = label; }
+  ~StatisticsProfileContext() { statisticsProfileLabel = previous; }
+};
+}
+#define STATISTICS_PROFILE_CONTEXT(label) StatisticsProfileContext statisticsContext(label)
+#else
+#define STATISTICS_PROFILE_CONTEXT(label) ((void)0)
+#endif
+
 
 Statistics::Statistics(String const& storageDirectory, StatisticsServicePtr service) {
+#ifdef STAR_SYSTEM_SWITCH2
+  m_bytecodeCache=make_shared<LuaBytecodeCache>(8*1024*1024,128);
+  m_bytecodeReloadListener=make_shared<CallbackListener>([cache=m_bytecodeCache]{cache->clear();});
+  Root::singleton().registerReloadListener(m_bytecodeReloadListener);
+#endif
   m_service = std::move(service);
   m_initialized = !m_service;
   m_storageDirectory = storageDirectory;
@@ -114,22 +135,30 @@ Json Statistics::Stat::toJson() const {
 }
 
 void Statistics::processEvent(String const& name, Json const& fields) {
+  STATISTICS_PROFILE_CONTEXT(name.utf8Ptr());
+  STAR_EXPLORATION_SCOPE(eventTrace, Switch2ExplorationProfile::Kind::StatsEvent, name.utf8Ptr());
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsEvents);
   if (m_service)
     m_service->reportEvent(name, fields);
   Logger::debug("Statistics: Event '{}': {}", name, fields.repr(0));
 
   auto statisticsDatabase = Root::singleton().statisticsDatabase();
   try {
-    if (auto const& event = statisticsDatabase->event(name)) {
+    STAR_EXPLORATION_SCOPE(lookupTrace, Switch2ExplorationProfile::Kind::StatsLookup, name.utf8Ptr());
+    auto event = statisticsDatabase->event(name);
+    lookupTrace.stop();
+    if (event) {
       try {
         runStatScript(event->scripts, event->config, "event", name, fields);
       } catch (std::exception const& e) {
+        STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsFailures);
         Logger::error("Statistics: Exception thrown while running `event` for an event named '{}' (fields: {}) in statistics scripts {} with config {}: {}",
             name, fields.repr(0), event->scripts, event->config.repr(0), outputException(e, true));
       }
     }
   } catch (std::exception const& e) {
-    Logger::error("Statistics: Exception thrown while attempting to load config for event '{}' (fields: {}): {}", name, fields.repr(0), outputException(e, true));
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsFailures);
+        Logger::error("Statistics: Exception thrown while attempting to load config for event '{}' (fields: {}): {}", name, fields.repr(0), outputException(e, true));
   }
 }
 
@@ -153,27 +182,36 @@ void Statistics::unlockAchievement(String const& name) {
 }
 
 bool Statistics::checkAchievement(String const& achievementName) {
+  STATISTICS_PROFILE_CONTEXT(achievementName.utf8Ptr());
+  STAR_EXPLORATION_SCOPE(achievementTrace, Switch2ExplorationProfile::Kind::StatsAchievement, achievementName.utf8Ptr());
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsAchievementChecks);
   auto statisticsDatabase = Root::singleton().statisticsDatabase();
   try {
+    STAR_EXPLORATION_SCOPE(lookupTrace, Switch2ExplorationProfile::Kind::StatsLookup, achievementName.utf8Ptr());
     auto achievement = statisticsDatabase->achievement(achievementName);
+    lookupTrace.stop();
     if (!achievement) {
       Logger::warn("Statistics: Achievement '{}' not found", achievementName);
       return false;
     }
 
-    if (achievementUnlocked(achievement->name))
+    if (achievementUnlocked(achievement->name)) {
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsAlreadyUnlocked);
       return true;
+    }
 
     try {
       Maybe<bool> result = runStatScript<bool>(achievement->scripts, achievement->config, "check", achievementName);
       return result && *result;
     } catch (std::exception const& e) {
-      Logger::error("Statistics: Exception thrown while running `check` for an achievement named '{}' in statistics scripts {} with config {}: {}",
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsFailures);
+        Logger::error("Statistics: Exception thrown while running `check` for an achievement named '{}' in statistics scripts {} with config {}: {}",
           achievementName, achievement->scripts, achievement->config.repr(0), outputException(e, true));
       return false;
     }
   } catch (std::exception const& e) {
-    Logger::error("Statistics: Exception thrown while attempting to load config for achievement '{}': {}", achievementName, outputException(e, true));
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsFailures);
+        Logger::error("Statistics: Exception thrown while attempting to load config for achievement '{}': {}", achievementName, outputException(e, true));
     return false;
   }
 }
@@ -245,12 +283,29 @@ LuaCallbacks Statistics::makeStatisticsCallbacks() {
 template <typename Result, typename... V>
 Maybe<Result> Statistics::runStatScript(StringList const& scripts, Json const& config, String const& functionName, V&&... args) {
   // FezzedOne: A new Lua root is needed for every stat script execution because the `config` argument's lifetime is bounded to this method and `config` can be smuggled.
+  STAR_EXPLORATION_SCOPE(scriptTrace, Switch2ExplorationProfile::Kind::StatsScript,
+      scripts.empty() ? "" : scripts.first().utf8Ptr(), scripts.size());
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsScripts);
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::StatsScriptFiles, scripts.size());
+  STAR_EXPLORATION_SCOPE(configTrace, Switch2ExplorationProfile::Kind::StatsConfig, statisticsProfileLabel);
   auto assets = Root::singleton().assets();
   auto clientConfig = assets->json("/client.config");
+  configTrace.stop();
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_EXPLORATION_PROFILE)
+  // Declared before the owned objects: destruction is measured until both the
+  // component and its Lua root have actually released ownership on normal exit.
+  std::optional<Switch2ExplorationProfile::Scope> destroyTrace;
+#endif
+  STAR_EXPLORATION_SCOPE(vmTrace, Switch2ExplorationProfile::Kind::StatsVmSetup, statisticsProfileLabel);
   auto luaRoot = make_shared<LuaRoot>();
+#ifdef STAR_SYSTEM_SWITCH2
+  luaRoot->setBytecodeCache(m_bytecodeCache);
+#endif
   luaRoot->tuneAutoGarbageCollection(clientConfig.get("luaGcPause").optFloat().value(1.2f),
       clientConfig.get("luaGcStepMultiplier").optFloat().value(1.2f));
 
+  vmTrace.stop();
+  STAR_EXPLORATION_SCOPE(componentTrace, Switch2ExplorationProfile::Kind::StatsComponentSetup, statisticsProfileLabel);
   LuaBaseComponent script;
   script.setLuaRoot(luaRoot);
   script.setScripts(scripts);
@@ -259,10 +314,19 @@ Maybe<Result> Statistics::runStatScript(StringList const& scripts, Json const& c
     return config.query(name, def);
   }));
   script.addCallbacks("statistics", makeStatisticsCallbacks());
+  componentTrace.stop();
+  STAR_EXPLORATION_SCOPE(initTrace, Switch2ExplorationProfile::Kind::StatsInit, statisticsProfileLabel);
   script.init();
+  initTrace.stop();
+  STAR_EXPLORATION_SCOPE(invokeTrace, Switch2ExplorationProfile::Kind::StatsInvoke, statisticsProfileLabel);
   Maybe<Result> result = script.invoke<Result>(functionName, args...);
+  invokeTrace.stop();
+  STAR_EXPLORATION_SCOPE(uninitTrace, Switch2ExplorationProfile::Kind::StatsUninit, statisticsProfileLabel);
   script.uninit();
-
+  uninitTrace.stop();
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_EXPLORATION_PROFILE)
+  destroyTrace.emplace(Switch2ExplorationProfile::Kind::StatsDestroy, statisticsProfileLabel);
+#endif
   luaRoot.reset();
   return result;
 }

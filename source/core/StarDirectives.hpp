@@ -1,3 +1,4 @@
+#include "StarSwitch2WaitProfile.hpp"
 #ifndef STAR_DIRECTIVES_HPP
 #define STAR_DIRECTIVES_HPP
 
@@ -71,7 +72,10 @@ public:
     size_t len = directiveString.utf8().length();
     if (len <= 1024)
       return Directives(directiveString);
-    MutexLocker locker(cachedDirectivesMutex());
+    Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::DirectivesLock);
+    MutexLocker locker(cachedDirectivesMutex(), false);
+    Switch2WaitProfile::acquire(locker, Switch2WaitProfile::Metric::DirectivesContended);
+    lockWait.stop();
     if (auto directives = directivesCache().ptr(directiveString))
       return *directives;
     locker.unlock();
@@ -84,7 +88,10 @@ public:
 
   static void cleanupDirectivesCache() {
     ZoneScopedN("cleanupDirectivesCache");
+    Switch2WaitProfile::Background wait("directives-cleanup-lock");
     MutexLocker locker(cachedDirectivesMutex());
+    wait.stop();
+    Switch2WaitProfile::Background held("directives-cleanup-held");
     directivesCache().cleanup();
   }
 

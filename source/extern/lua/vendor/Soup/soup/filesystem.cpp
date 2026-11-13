@@ -9,7 +9,10 @@
 #pragma comment(lib, "shell32.lib") // SHGetFolderPathW
 #pragma comment(lib, "user32.lib") // SendInput
 #else
+#ifndef __SWITCH2__
 #include <sys/mman.h>
+#endif
+#include <cstdlib>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -86,7 +89,22 @@ NAMESPACE_SOUP
 	const void* filesystem::createFileMapping(const std::filesystem::path& path, size_t& out_len) noexcept
 	{
 		const void* addr = nullptr;
-#if SOUP_WINDOWS
+#if defined(__SWITCH2__)
+        // SD files cannot be mmap'ed. Preserve the read-only mapping interface
+        // with an owned buffer and fail cleanly on a short read/allocation.
+        auto file = std::fopen(path.c_str(), "rb");
+        if (!file) return nullptr;
+        struct stat st;
+        if (fstat(fileno(file), &st) == 0 && st.st_size >= 0) {
+            out_len = static_cast<size_t>(st.st_size);
+            if (!out_len) addr = &empty_file_data;
+            else if (auto buffer = std::malloc(out_len)) {
+                if (std::fread(buffer, 1, out_len, file) == out_len) addr = buffer;
+                else std::free(buffer);
+            }
+        }
+        std::fclose(file);
+#elif SOUP_WINDOWS
 		HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, 0, NULL);
 		SOUP_IF_LIKELY (f != INVALID_HANDLE_VALUE)
 		{
@@ -143,6 +161,8 @@ NAMESPACE_SOUP
 		{
 #if SOUP_WINDOWS
 			UnmapViewOfFile(addr);
+#elif defined(__SWITCH2__)
+            std::free(const_cast<void*>(addr));
 #else
 			munmap(const_cast<void*>(addr), len);
 #endif

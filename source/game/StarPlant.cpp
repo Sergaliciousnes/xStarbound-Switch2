@@ -1,4 +1,5 @@
 #include "StarPlant.hpp"
+#include "StarPlantVisualBounds.hpp"
 #include "StarAssets.hpp"
 #include "StarEntityRendering.hpp"
 #include "StarImage.hpp"
@@ -719,6 +720,21 @@ void Plant::calcBoundBox() {
   // Plants are allowed to visibly occupy one outside space from the spaces
   // they take up.
   m_metaBoundBox = RectF(boundBox.min() - Vec2F(1, 1), boundBox.max() + Vec2F(2, 2));
+  m_visualBoundBox = RectF::null();
+  for (auto const& piece : m_pieces) {
+    auto size = Vec2F(piece.imageSize) / TilePixels;
+    bool rotating = piece.rotationType == RotateBranch || piece.rotationType == RotateLeaves
+        || piece.rotationType == RotateCrownBranch || piece.rotationType == RotateCrownLeaves;
+    bool crown = piece.rotationType == RotateCrownBranch || piece.rotationType == RotateCrownLeaves;
+    auto bounds = plantVisualBounds(piece.offset[0], piece.offset[1], size[0], size[1], piece.flip, rotating, crown);
+    m_visualBoundBox.combine(RectF({bounds[0], bounds[1]}, {bounds[2], bounds[3]}));
+  }
+}
+
+RectF Plant::visualBoundBox() const {
+  if (m_visualBoundBox.isNull()) return m_visualBoundBox;
+  // Rotation preserves the length of the horizontal damage displacement.
+  return m_visualBoundBox.padded(0.25f + 0.1f * std::abs(m_tileDamageStatus.damageEffectPercentage()));
 }
 
 float Plant::branchRotation(float xPos, float rotoffset) const {
@@ -750,27 +766,33 @@ void Plant::update(float dt, uint64_t) {
 }
 
 void Plant::render(RenderCallback* renderCallback) {
+  render(renderCallback, true);
+}
+
+void Plant::render(RenderCallback* renderCallback, bool drawVisuals) {
   float damageXOffset = Random::randf(-0.1f, 0.1f) * m_tileDamageStatus.damageEffectPercentage();
 
-  for (auto const& plantPiece : m_pieces) {
-    auto size = Vec2F(plantPiece.imageSize) / TilePixels;
+  if (drawVisuals) {
+    for (auto const& plantPiece : m_pieces) {
+      auto size = Vec2F(plantPiece.imageSize) / TilePixels;
 
-    Vec2F offset = plantPiece.offset;
-    if ((m_ceiling && offset[1] <= m_tileDamageY) || (!m_ceiling && offset[1] + size[1] >= m_tileDamageY))
-      offset[0] += damageXOffset;
+      Vec2F offset = plantPiece.offset;
+      if ((m_ceiling && offset[1] <= m_tileDamageY) || (!m_ceiling && offset[1] + size[1] >= m_tileDamageY))
+        offset[0] += damageXOffset;
 
-    auto drawable = Drawable::makeImage(plantPiece.imagePath, 1.0f / TilePixels, false, offset);
-    if (plantPiece.flip)
-      drawable.scale(Vec2F(-1, 1));
+      auto drawable = Drawable::makeImage(plantPiece.imagePath, 1.0f / TilePixels, false, offset);
+      if (plantPiece.flip)
+        drawable.scale(Vec2F(-1, 1));
 
-    if (plantPiece.rotationType == RotateCrownBranch || plantPiece.rotationType == RotateCrownLeaves) {
-      drawable.rotate(branchRotation(m_tilePosition[0], plantPiece.rotationOffset * 1.4f) * 0.7f, plantPiece.offset + Vec2F(size[0] / 2.0f, 0));
-      drawable.translate(Vec2F(0, -0.40f));
-    } else if (plantPiece.rotationType == RotateBranch || plantPiece.rotationType == RotateLeaves) {
-      drawable.rotate(branchRotation(m_tilePosition[0], plantPiece.rotationOffset * 1.4f), plantPiece.offset + Vec2F(size) / 2.0f);
+      if (plantPiece.rotationType == RotateCrownBranch || plantPiece.rotationType == RotateCrownLeaves) {
+        drawable.rotate(branchRotation(m_tilePosition[0], plantPiece.rotationOffset * 1.4f) * 0.7f, plantPiece.offset + Vec2F(size[0] / 2.0f, 0));
+        drawable.translate(Vec2F(0, -0.40f));
+      } else if (plantPiece.rotationType == RotateBranch || plantPiece.rotationType == RotateLeaves) {
+        drawable.rotate(branchRotation(m_tilePosition[0], plantPiece.rotationOffset * 1.4f), plantPiece.offset + Vec2F(size) / 2.0f);
+      }
+      drawable.translate(position());
+      renderCallback->addDrawable(std::move(drawable), RenderLayerPlant);
     }
-    drawable.translate(position());
-    renderCallback->addDrawable(std::move(drawable), RenderLayerPlant);
   }
 
   if (m_tileDamageEvent) {

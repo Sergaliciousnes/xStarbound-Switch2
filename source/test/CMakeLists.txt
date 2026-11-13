@@ -1,5 +1,17 @@
 find_package(GTest REQUIRED)
 
+if(TARGET Star::Rendering)
+    # Keep this runner in one executable: the Windows rpmalloc build cannot
+    # safely exchange allocator-owned objects with the shared GTest runtime.
+    add_executable(rendering_tests asset_texture_cache_test.cpp)
+    target_link_libraries(rendering_tests Star::Rendering)
+    if(STAR_ENABLE_VULKAN)
+        target_compile_definitions(rendering_tests PRIVATE STAR_TEST_VULKAN)
+    endif()
+    # Like game_tests, these integration checks require installed game assets;
+    # invoke with an isolated -bootconfig rather than registering with CTest.
+endif()
+
 add_executable(core_tests
         algorithm_test.cpp
         block_allocator_test.cpp

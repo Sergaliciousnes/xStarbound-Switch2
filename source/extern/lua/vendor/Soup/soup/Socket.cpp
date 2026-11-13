@@ -78,12 +78,14 @@ NAMESPACE_SOUP
 
 			signal::handle(SIGPIPE, &sigpipe_handler_proc);
 
+#ifndef __SWITCH2__
 			rlimit rlim;
 			if (getrlimit(RLIMIT_NOFILE, &rlim) == 0)
 			{
 				rlim.rlim_cur = rlim.rlim_max;
 				setrlimit(RLIMIT_NOFILE, &rlim);
 			}
+#endif
 		}
 #endif
 	}

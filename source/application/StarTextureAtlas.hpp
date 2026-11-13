@@ -63,8 +63,9 @@ public:
   void compressionPass(size_t textureCount = NPos);
 
   // The number of atlases that the AtlasSet will attempt to fit a texture in
-  // before giving up and creating a new atlas.  Tries in order of least full
-  // to most full.  Defaults to 3.
+  // before giving up and creating a new atlas.  Tries candidate atlases in
+  // order of most full to least full. Only failed fit searches consume this
+  // budget; one untried least-full page may be checked as fallback. Defaults to 3.
   unsigned textureFitTries() const;
   void setTextureFitTries(unsigned textureFitTries);
 
@@ -176,13 +177,36 @@ auto TextureAtlasSet<AtlasTextureHandle>::addTexture(Image const& image, bool bo
     return textureEntry;
   };
 
-  // Try the first 'm_textureFitTries' atlases to see if we can fit a given
-  // texture in an existing atlas.  Do this from the most full to the least
-  // full atlas to maximize compression.
-  size_t startAtlas = m_atlases.size() - min<size_t>(m_atlases.size(), m_textureFitTries);
-  for (size_t i = startAtlas; i < m_atlases.size(); ++i) {
-    if (auto texturePtr = tryAtlas(m_atlases[i].get()))
+  // Try candidate atlases in order of fullest to least full. Skip pages
+  // that do not have enough total free cells before running rectangle searches.
+  Vec2U finalImageSize = finalImage.size();
+  size_t numCellsX = (finalImageSize[0] + m_atlasCellSize - 1) / m_atlasCellSize;
+  size_t numCellsY = (finalImageSize[1] + m_atlasCellSize - 1) / m_atlasCellSize;
+  size_t requiredCells = numCellsX * numCellsY;
+  size_t totalAtlasCells = (size_t)m_atlasNumCells * m_atlasNumCells;
+
+  TextureAtlas* lastTried = nullptr;
+  unsigned triesLeft = m_textureFitTries;
+  for (size_t i = 0; i < m_atlases.size() && triesLeft > 0; ++i) {
+    auto& atlas = m_atlases[i];
+    if (totalAtlasCells - atlas->usedCellCount < requiredCells)
+      continue;
+
+    lastTried = atlas.get();
+    if (auto texturePtr = tryAtlas(atlas.get()))
       return texturePtr;
+
+    --triesLeft;
+  }
+
+  // Fallback: if bounded search of fullest pages failed due to fragmentation,
+  // try the least-full atlas if it was not already tried and can plausibly fit.
+  if (!m_atlases.empty()) {
+    auto& emptiestAtlas = m_atlases.last();
+    if (emptiestAtlas.get() != lastTried && totalAtlasCells - emptiestAtlas->usedCellCount >= requiredCells) {
+      if (auto texturePtr = tryAtlas(emptiestAtlas.get()))
+        return texturePtr;
+    }
   }
 
   // If we have not found an existing atlas to put the texture, need to create
@@ -207,6 +231,13 @@ void TextureAtlasSet<AtlasTextureHandle>::freeTexture(TextureHandle const& textu
 
   setAtlasRegionUsed(textureEntry->atlasPlacement.atlas, textureEntry->atlasPlacement.occupiedCells, false);
   sortAtlases();
+
+  // Reclaim trailing empty atlases without moving live textures.
+  // Retain at least 1 atlas (even if empty) to prevent allocation churn.
+  while (m_atlases.size() > 1 && m_atlases.last()->usedCellCount == 0) {
+    destroyAtlasTexture(m_atlases.last()->atlasTexture);
+    m_atlases.removeLast();
+  }
 
   textureEntry->textureExpired = true;
   m_textures.remove(textureEntry);
@@ -264,16 +295,29 @@ void TextureAtlasSet<AtlasTextureHandle>::compressionPass(size_t textureCount) {
     if (!smallestTexture)
       break;
 
-    // Try to add the texture to any atlas that isn't the last (most empty) one
-    size_t startAtlas = m_atlases.size() - 1 - min<size_t>(m_atlases.size() - 1, m_textureFitTries);
-    for (size_t i = startAtlas; i < m_atlases.size() - 1; ++i) {
-      if (auto placement = addTextureToAtlas(m_atlases[i].get(), smallestTexture->textureImage, smallestTexture->atlasPlacement.borderPixels)) {
+    // Try to add the texture to any atlas that isn't the last (most empty) one,
+    // scanning fullest first and skipping atlases with insufficient space.
+    Vec2U smallestImageSize = smallestTexture->textureImage.size();
+    size_t numCellsX = (smallestImageSize[0] + m_atlasCellSize - 1) / m_atlasCellSize;
+    size_t numCellsY = (smallestImageSize[1] + m_atlasCellSize - 1) / m_atlasCellSize;
+    size_t requiredCells = numCellsX * numCellsY;
+    size_t totalAtlasCells = (size_t)m_atlasNumCells * m_atlasNumCells;
+
+    unsigned triesLeft = m_textureFitTries;
+    for (size_t i = 0; i < m_atlases.size() - 1 && triesLeft > 0; ++i) {
+      auto& atlas = m_atlases[i];
+      if (totalAtlasCells - atlas->usedCellCount < requiredCells)
+        continue;
+
+      if (auto placement = addTextureToAtlas(atlas.get(), smallestTexture->textureImage, smallestTexture->atlasPlacement.borderPixels)) {
         setAtlasRegionUsed(smallestTexture->atlasPlacement.atlas, smallestTexture->atlasPlacement.occupiedCells, false);
         smallestTexture->atlasPlacement = *placement;
         smallestTexture = nullptr;
         sortAtlases();
         break;
       }
+
+      --triesLeft;
     }
 
     // If we have not managed to move the smallest texture into any other
@@ -364,34 +408,40 @@ auto TextureAtlasSet<AtlasTextureHandle>::addTextureToAtlas(TextureAtlas* atlas,
   if (numCellsX > m_atlasNumCells || numCellsY > m_atlasNumCells)
     return {};
 
-  for (size_t cellY = 0; cellY <= m_atlasNumCells - numCellsY; ++cellY) {
-    for (size_t cellX = 0; cellX <= m_atlasNumCells - numCellsX; ++cellX) {
-      // Check this box of numCellsX x numCellsY for fit.
-      found = true;
-      size_t fx;
-      size_t fy;
-      for (fy = cellY; fy < cellY + numCellsY; ++fy) {
-        for (fx = cellX; fx < cellX + numCellsX; ++fx) {
-          if (atlas->usedCells[fy * m_atlasNumCells + fx]) {
-            found = false;
-            break;
+  if (atlas->usedCellCount == 0) {
+    fitCellX = 0;
+    fitCellY = 0;
+    found = true;
+  } else {
+    for (size_t cellY = 0; cellY <= m_atlasNumCells - numCellsY; ++cellY) {
+      for (size_t cellX = 0; cellX <= m_atlasNumCells - numCellsX; ++cellX) {
+        // Check this box of numCellsX x numCellsY for fit.
+        found = true;
+        size_t fx;
+        size_t fy;
+        for (fy = cellY; fy < cellY + numCellsY; ++fy) {
+          for (fx = cellX; fx < cellX + numCellsX; ++fx) {
+            if (atlas->usedCells[fy * m_atlasNumCells + fx]) {
+              found = false;
+              break;
+            }
           }
+          if (!found)
+            break;
         }
-        if (!found)
+        if (!found) {
+          // If it does not fit, then we can skip to the block past the first
+          // horizontal used block;
+          cellX = fx;
+        } else {
+          fitCellX = cellX;
+          fitCellY = cellY;
           break;
+        }
       }
-      if (!found) {
-        // If it does not fit, then we can skip to the block past the first
-        // horizontal used block;
-        cellX = fx;
-      } else {
-        fitCellX = cellX;
-        fitCellY = cellY;
+      if (found)
         break;
-      }
     }
-    if (found)
-      break;
   }
 
   if (!found)

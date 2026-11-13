@@ -2,6 +2,7 @@
 
 #define LUA_LIB
 #include "lualib.h"
+#include "StarBootstrapBytecode.hpp"
 
 static const luaL_Reg funcs[] = {
   {nullptr, nullptr}
@@ -311,9 +312,13 @@ setmetatable(module, {
 module.AssertionError = AssertionError
 
 return module)EOC";
+#ifdef STAR_PLUTO_BOOTSTRAP_CACHE
+  return StarPlutoBootstrap::open(L, StarPlutoBootstrap::Library::Assert, code, strlen(code), "pluto:assert");
+#else
   luaL_loadbuffer(L, code, strlen(code), "pluto:assert");
   lua_call(L, 0, 1);
   return 1;
+#endif
 #endif
 }
 

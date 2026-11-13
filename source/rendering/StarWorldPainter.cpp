@@ -1,4 +1,7 @@
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarWorldPainter.hpp"
+#include "StarSwitch2Diagnostics.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarAnimation.hpp"
 #include "StarAssets.hpp"
 #include "StarConfiguration.hpp"
@@ -160,6 +163,7 @@ JsonObject WorldPainter::tileRenderDirectives() const {
 }
 
 void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWaiter, Maybe<Vec3F> const& lightMultiplier, Array<Vec3F, 6> const& shaderParameters) {
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: camera/configuration");
   auto& el = m_enabledLayers;
 
   m_camera.setScreenSize(m_renderer->screenSize());
@@ -167,7 +171,12 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
 
   m_assets = Root::singleton().assets();
 
-  m_tilePainter->setup(m_camera, renderData, m_tileRenderDirectives);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: tile setup");
+  {
+    Switch2FrameProfile::Zone tileZone(Switch2FrameProfile::Phase::Tiles);
+    Switch2WaitProfile::Scope wait_tileZone(Switch2WaitProfile::Metric::TileSetup);
+    m_tilePainter->setup(m_camera, renderData, m_tileRenderDirectives);
+  }
 
   // Stars, Debris Fields, Sky, and Orbiters
 
@@ -176,27 +185,42 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   float starAndDebrisRatio = lerp(0.0625f, pixelRatioBasis * 2.0f, m_camera.pixelRatio());
   float orbiterAndPlanetRatio = lerp(0.125f, pixelRatioBasis * 3.0f, m_camera.pixelRatio());
 
-  if (el.stars)
-    m_environmentPainter->renderStars(starAndDebrisRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
-  if (el.debrisFields)
-    m_environmentPainter->renderDebrisFields(starAndDebrisRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
-  if (el.backOrbiters)
-    m_environmentPainter->renderBackOrbiters(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
-  if (el.planetHorizon)
-    m_environmentPainter->renderPlanetHorizon(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
-  if (el.sky)
-    m_environmentPainter->renderSky(Vec2F(m_camera.screenSize()), renderData.skyRenderData);
-  if (el.frontOrbiters)
-    m_environmentPainter->renderFrontOrbiters(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+  {
+    Switch2FrameProfile::Zone skyZone(Switch2FrameProfile::Phase::Sky);
+    Switch2WaitProfile::Scope wait_skyZone(Switch2WaitProfile::Metric::SkyPaint);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: stars");
+    if (el.stars)
+      m_environmentPainter->renderStars(starAndDebrisRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: debris fields");
+    if (el.debrisFields)
+      m_environmentPainter->renderDebrisFields(starAndDebrisRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: back orbiters");
+    if (el.backOrbiters)
+      m_environmentPainter->renderBackOrbiters(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: planet horizon");
+    if (el.planetHorizon)
+      m_environmentPainter->renderPlanetHorizon(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: sky");
+    if (el.sky)
+      m_environmentPainter->renderSky(Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: front orbiters");
+    if (el.frontOrbiters)
+      m_environmentPainter->renderFrontOrbiters(orbiterAndPlanetRatio, Vec2F(m_camera.screenSize()), renderData.skyRenderData);
+  }
 
   m_renderer->flush();
 
   if (lightWaiter) {
+    Switch2FrameProfile::Zone lightZone(Switch2FrameProfile::Phase::LightingWait);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "paint: lighting wait");
     auto start = Time::monotonicMicroseconds();
     lightWaiter();
-    LogMap::set("async_light_wait", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
+    STAR_LOG_MAP_SET("async_light_wait", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
   }
 
+  Switch2FrameProfile::Zone lightingZone(Switch2FrameProfile::Phase::PaintLighting);
+
+  Switch2WaitProfile::Scope wait_lightingZone(Switch2WaitProfile::Metric::LightingPaint);
   {
     m_renderer->setEffectParameter("param1", shaderParameters[0]);
     m_renderer->setEffectParameter("param2", shaderParameters[1]);
@@ -220,6 +244,8 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   }
 
   // Parallax layers
+  lightingZone.stop();
+  wait_lightingZone.stop();
 
   if (el.parallax) {
     auto parallaxDelta = m_camera.worldGeometry().diff(m_camera.centerWorldPosition(), m_previousCameraCenter);
@@ -231,11 +257,17 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   }
   m_previousCameraCenter = m_camera.centerWorldPosition();
 
-  if (el.parallax && !renderData.parallaxLayers.empty())
+  if (el.parallax && !renderData.parallaxLayers.empty()) {
+    Switch2FrameProfile::Zone parallaxZone(Switch2FrameProfile::Phase::Parallax);
+    Switch2WaitProfile::Scope wait_parallaxZone(Switch2WaitProfile::Metric::ParallaxPaint);
     m_environmentPainter->renderParallaxLayers(m_parallaxWorldPosition, m_camera, renderData.parallaxLayers, renderData.skyRenderData);
+  }
 
   // Main world layers
 
+  Switch2FrameProfile::Zone layerGroupingZone(Switch2FrameProfile::Phase::EntityLayers);
+
+  Switch2WaitProfile::Scope wait_layerGroupingZone(Switch2WaitProfile::Metric::EntityPaint);
   Map<EntityRenderLayer, List<pair<EntityHighlightEffect, List<Drawable>>>> entityDrawables;
   for (auto& ed : renderData.entityDrawables) {
     for (auto& p : ed.layers)
@@ -243,6 +275,8 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   }
 
   auto entityDrawableIterator = entityDrawables.begin();
+  layerGroupingZone.stop();
+  wait_layerGroupingZone.stop();
   auto renderEntitiesUntil = [this, &entityDrawables, &entityDrawableIterator](Maybe<EntityRenderLayer> until) {
     while (true) {
       if (!m_enabledLayers.entities)
@@ -262,17 +296,33 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   renderEntitiesUntil(RenderLayerBackgroundOverlay);
   if (el.backgroundOverlays) drawDrawableSet(renderData.backgroundOverlays, m_overlayRenderDirectives.backgroundOverlays);
   renderEntitiesUntil(RenderLayerBackgroundTile);
-  if (el.backgroundTiles) m_tilePainter->renderBackground(m_camera);
+  if (el.backgroundTiles) {
+    Switch2FrameProfile::Zone terrainZone(Switch2FrameProfile::Phase::TerrainDraw);
+    Switch2WaitProfile::Scope wait_terrainZone(Switch2WaitProfile::Metric::TerrainPaint);
+    m_tilePainter->renderBackground(m_camera);
+  }
   renderEntitiesUntil(RenderLayerPlatform);
-  if (el.midgroundTiles) m_tilePainter->renderMidground(m_camera);
+  if (el.midgroundTiles) {
+    Switch2FrameProfile::Zone terrainZone(Switch2FrameProfile::Phase::TerrainDraw);
+    Switch2WaitProfile::Scope wait_terrainZone(Switch2WaitProfile::Metric::TerrainPaint);
+    m_tilePainter->renderMidground(m_camera);
+  }
   renderEntitiesUntil(RenderLayerBackParticle);
   if (el.particles) renderParticles(renderData, Particle::Layer::Back, m_overlayRenderDirectives.particles);
   renderEntitiesUntil(RenderLayerLiquid);
-  if (el.liquids) m_tilePainter->renderLiquid(m_camera);
+  if (el.liquids) {
+    Switch2FrameProfile::Zone terrainZone(Switch2FrameProfile::Phase::TerrainDraw);
+    Switch2WaitProfile::Scope wait_terrainZone(Switch2WaitProfile::Metric::TerrainPaint);
+    m_tilePainter->renderLiquid(m_camera);
+  }
   renderEntitiesUntil(RenderLayerMiddleParticle);
   if (el.particles) renderParticles(renderData, Particle::Layer::Middle, m_overlayRenderDirectives.particles);
   renderEntitiesUntil(RenderLayerForegroundTile);
-  if (el.foregroundTiles) m_tilePainter->renderForeground(m_camera);
+  if (el.foregroundTiles) {
+    Switch2FrameProfile::Zone terrainZone(Switch2FrameProfile::Phase::TerrainDraw);
+    Switch2WaitProfile::Scope wait_terrainZone(Switch2WaitProfile::Metric::TerrainPaint);
+    m_tilePainter->renderForeground(m_camera);
+  }
   renderEntitiesUntil(RenderLayerForegroundOverlay);
   if (el.overlays) drawDrawableSet(renderData.foregroundOverlays, m_overlayRenderDirectives.foregroundOverlays);
   renderEntitiesUntil(RenderLayerFrontParticle);
@@ -286,6 +336,9 @@ void WorldPainter::render(WorldRenderData& renderData, function<void()> lightWai
   if (dimLevel != 0)
     m_renderer->render(renderFlatRect(RectF::withSize({}, Vec2F(m_camera.screenSize())), Vec4B(renderData.dimColor, dimLevel), 0.0f));
 
+  Switch2FrameProfile::Zone cleanupZone(Switch2FrameProfile::Phase::PaintCleanup);
+
+  Switch2WaitProfile::Scope wait_cleanupZone(Switch2WaitProfile::Metric::PaintCleanup);
   int64_t textureTimeout = m_assets->json("/rendering.config:textureTimeout").toInt();
   m_textPainter->cleanup(textureTimeout);
   m_drawablePainter->cleanup(textureTimeout);
@@ -298,6 +351,8 @@ void WorldPainter::adjustLighting(WorldRenderData& renderData, Maybe<Vec3F> cons
 }
 
 void WorldPainter::renderParticles(WorldRenderData& renderData, Particle::Layer layer, Directives const& renderDirectives) {
+  Switch2FrameProfile::Zone particleZone(Switch2FrameProfile::Phase::ParticleDraw);
+  Switch2WaitProfile::Scope wait_particleZone(Switch2WaitProfile::Metric::ParticlePaint);
   const int textParticleFontSize = m_assets->json("/rendering.config:textParticleFontSize").toInt();
   const RectF particleRenderWindow = RectF::withSize(Vec2F(), Vec2F(m_camera.screenSize())).padded(m_assets->json("/rendering.config:particleRenderWindowPadding").toInt());
 
@@ -373,6 +428,8 @@ void WorldPainter::renderParticles(WorldRenderData& renderData, Particle::Layer 
 }
 
 void WorldPainter::renderBars(WorldRenderData& renderData, Directives const& renderDirectives) {
+  Switch2FrameProfile::Zone overlayZone(Switch2FrameProfile::Phase::OverlayDraw);
+  Switch2WaitProfile::Scope wait_overlayZone(Switch2WaitProfile::Metric::OverlayPaint);
   auto offset = m_entityBarOffset;
   for (auto const& bar : renderData.overheadBars) {
     auto position = bar.entityPosition + offset;
@@ -400,6 +457,8 @@ void WorldPainter::renderBars(WorldRenderData& renderData, Directives const& ren
 }
 
 void WorldPainter::drawEntityLayer(List<Drawable> drawables, EntityHighlightEffect highlightEffect) {
+  Switch2FrameProfile::Zone entityZone(Switch2FrameProfile::Phase::EntityLayers);
+  Switch2WaitProfile::Scope wait_entityZone(Switch2WaitProfile::Metric::EntityPaint);
   highlightEffect.level *= m_highlightConfig.getFloat("maxHighlightLevel", 1.0);
   if (highlightEffect.overrideOverlayDirectives || highlightEffect.overrideUnderlayDirectives) {
     auto underlayDirectives = highlightEffect.overrideUnderlayDirectives ? *(highlightEffect.overrideUnderlayDirectives) : Directives();
@@ -481,6 +540,8 @@ void WorldPainter::drawDrawable(Drawable drawable, Directives const& renderDirec
 }
 
 void WorldPainter::drawDrawableSet(List<Drawable>& drawables, Directives const& renderDirectives) {
+  Switch2FrameProfile::Zone overlayZone(Switch2FrameProfile::Phase::OverlayDraw);
+  Switch2WaitProfile::Scope wait_overlayZone(Switch2WaitProfile::Metric::OverlayPaint);
   for (Drawable& drawable : drawables)
     drawDrawable(std::move(drawable), renderDirectives);
 

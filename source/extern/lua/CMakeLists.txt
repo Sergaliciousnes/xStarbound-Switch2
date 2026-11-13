@@ -93,3 +93,19 @@ target_link_libraries(pluto
         PUBLIC
         soup
 )
+
+if(STAR_SYSTEM_SWITCH2)
+    target_compile_definitions(pluto PRIVATE PLUTO_NO_OS_EXECUTE)
+endif()
+
+if(STAR_SYSTEM_SWITCH2)
+  option(STAR_SWITCH2_BOOTSTRAP_CACHE "Cache serialized built-in Pluto library bootstraps" ON)
+else()
+  option(STAR_SWITCH2_BOOTSTRAP_CACHE "Cache serialized built-in Pluto library bootstraps" OFF)
+endif()
+if(STAR_SWITCH2_BOOTSTRAP_CACHE)
+  set_property(SOURCE lassertlib.cpp lvector3lib.cpp lschedulerlib.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_PLUTO_BOOTSTRAP_CACHE)
+  if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+    set_property(SOURCE lassertlib.cpp lvector3lib.cpp lschedulerlib.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SYSTEM_SWITCH2 STAR_SWITCH2_EXPLORATION_PROFILE)
+  endif()
+endif()

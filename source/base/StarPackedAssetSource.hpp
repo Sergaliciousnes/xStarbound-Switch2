@@ -8,6 +8,9 @@
 namespace Star {
 
 STAR_CLASS(PackedAssetSource);
+#ifdef STAR_SYSTEM_SWITCH2
+STAR_CLASS(PackedAssetFile);
+#endif
 
 class PackedAssetSource : public AssetSource {
 public:
@@ -26,7 +29,7 @@ public:
   static void build(DirectoryAssetSource& directorySource, String const& targetPackedFile,
       StringList const& extensionSorting = {}, BuildProgressCallback progressCallback = {});
 
-  PackedAssetSource(String const& packedFileName);
+  PackedAssetSource(String const& packedFileName, bool metadataOnly = false);
 
   JsonObject metadata() const override;
   StringList assetPaths() const override;
@@ -35,7 +38,11 @@ public:
   ByteArray read(String const& path) override;
 
 private:
+#ifdef STAR_SYSTEM_SWITCH2
+  PackedAssetFilePtr m_packedFile;
+#else
   FilePtr m_packedFile;
+#endif
   JsonObject m_metadata;
   OrderedHashMap<String, pair<uint64_t, uint64_t>> m_index;
 };

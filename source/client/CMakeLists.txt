@@ -26,14 +26,22 @@ target_link_libraries(xclient
         Star::Frontend
 )
 
+if(STAR_SYSTEM_SWITCH2)
+    nx_generate_nacp(OUTPUT xclient.nacp NAME "xStarbound" AUTHOR "Sergalicious" VERSION "${PROJECT_VERSION}")
+    nx_create_nro(xclient NACP xclient.nacp ICON "${CMAKE_CURRENT_SOURCE_DIR}/xclient-switch2.jpg")
+endif()
+
 if(STAR_COMPILER_GNU AND STAR_CROSS_COMPILE)
     # `-mwindows` stops cross-compiled xClient from opening up a console window when started.
     target_link_options(xclient BEFORE PUBLIC "-mwindows")
 endif()
 
-# Copy configuration file to the same dir as the executable for testing
+# The active config runs against source-tree assets. Also provide a clearly
+# named install config for users manually copying the executable into a game
+# installation; copying the active build config would retain source-tree paths.
 add_custom_command(TARGET xclient POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/xsbinit.config.build" "$<TARGET_FILE_DIR:xclient>/xsbinit.config"
+        COMMAND ${CMAKE_COMMAND} -E copy "${CMAKE_BINARY_DIR}/xsbinit.config" "$<TARGET_FILE_DIR:xclient>/xsbinit.config.install"
 )
 
 # Also copy Steam/Discord SDK libraries over to the build dir on Windows. UNIX has RPATH for this.
@@ -50,6 +58,10 @@ if (STAR_SYSTEM_WINDOWS)
     endif()
 endif()
 
+if(STAR_SYSTEM_SWITCH2)
+    install(FILES "$<TARGET_FILE_DIR:xclient>/xclient.nro"
+            DESTINATION ${STAR_INSTALL_BINDIR} COMPONENT Client)
+else()
 install(TARGETS xclient
         RUNTIME_DEPENDENCY_SET STAR_RUNTIME_DEPS
         RUNTIME DESTINATION ${STAR_INSTALL_BINDIR}
@@ -71,6 +83,29 @@ install(RUNTIME_DEPENDENCY_SET STAR_RUNTIME_DEPS
         FRAMEWORK DESTINATION ${STAR_INSTALL_LIBDIR}
         COMPONENT Libraries
 )
+
+endif()
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_GAMEPLAY_REGRESSION)
+    set_source_files_properties(StarClientApplication.cpp PROPERTIES COMPILE_DEFINITIONS STAR_SWITCH2_GAMEPLAY_REGRESSION)
+endif()
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_ALLOCATION_PROFILE)
+    target_sources(xclient PRIVATE ../core/StarSwitch2HeapWait.cpp)
+    target_link_options(xclient PRIVATE "-Wl,--wrap=__malloc_lock")
+    target_sources(xclient PRIVATE ../core/StarSwitch2AllocationWrappers.cpp)
+    target_link_options(xclient PRIVATE "-Wl,--wrap=_Znwm,--wrap=_Znam,--wrap=_ZdlPv,--wrap=_ZdaPv,--wrap=_ZdlPvm,--wrap=_ZdaPvm,--wrap=malloc,--wrap=calloc,--wrap=realloc,--wrap=free")
+endif()
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_GAME_RPMALLOC)
+    target_sources(xclient PRIVATE ../core/StarSwitch2CppAllocator.cpp)
+    set_property(SOURCE StarClientApplication.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_RPMALLOC)
+    set_property(SOURCE ../core/StarSwitch2AllocationWrappers.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_RPMALLOC)
+    target_link_options(xclient PRIVATE "-Wl,-Map,xclient-rpmalloc.map")
+    if(NOT STAR_SWITCH2_ALLOCATION_PROFILE)
+        target_sources(xclient PRIVATE ../core/StarSwitch2GameCWrappers.cpp)
+    endif()
+endif()
 
 if(STAR_ENABLE_STEAM_INTEGRATION)
     install(FILES

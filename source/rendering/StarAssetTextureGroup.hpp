@@ -7,6 +7,7 @@
 #include "StarMaybe.hpp"
 #include "StarRenderer.hpp"
 #include "StarString.hpp"
+#include <unordered_set>
 
 namespace Star {
 
@@ -17,7 +18,9 @@ class AssetTextureGroup {
 public:
   // Creates a texture group using the given renderer and textureFiltering for
   // the managed textures.
-  AssetTextureGroup(TextureGroupPtr textureGroup);
+  // An optional idle retention budget replaces timeout expiry. Intended for
+  // standalone textures: logical RGBA size does not describe atlas residency.
+  AssetTextureGroup(TextureGroupPtr textureGroup, uint64_t retainedIdleBytes = 0);
 
   // Load the given texture into the texture group if it is not loaded, and
   // return the texture pointer.
@@ -31,6 +34,8 @@ public:
   bool textureLoaded(AssetPath const& imagePath) const;
 
   // Frees textures that haven't been used in more than 'textureTimeout' time.
+  // With an idle retention budget, keeps this frame's working set and fills
+  // the idle budget with the most recently used textures instead.
   // If Root has been reloaded, will simply clear the texture group.
   void cleanup(int64_t textureTimeout);
 
@@ -48,6 +53,8 @@ private:
   // @LumiKalt: When the last full pass over the textures ran. Expiry is measured in seconds, so
   // cleanup() does not need to walk every texture on every call.
   int64_t m_lastCleanup = 0;
+  uint64_t m_retainedIdleBytes = 0;
+  std::unordered_set<Texture const*> m_usedTextures;
 };
 
 } // namespace Star

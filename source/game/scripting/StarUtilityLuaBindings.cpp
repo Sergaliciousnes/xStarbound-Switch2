@@ -199,7 +199,7 @@ void LuaBindings::UtilityCallbacks::logError(String const& str, LuaVariadic<LuaV
 }
 
 void LuaBindings::UtilityCallbacks::setLogMap(String const& key, String const& value, LuaVariadic<LuaValue> const& args) {
-  LogMap::set(key, formatLua(value, args));
+  STAR_LOG_MAP_SET(key, formatLua(value, args));
 }
 
 String LuaBindings::UtilityCallbacks::printJson(Json const& arg, Maybe<int> pretty) {

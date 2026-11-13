@@ -1,4 +1,7 @@
 #include "StarTilePainter.hpp"
+#include "StarCachedAlias.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarSwitch2Diagnostics.hpp"
 #include "StarAssets.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarLexicalCast.hpp"
@@ -119,7 +122,9 @@ void TilePainter::setup(WorldCamera const& camera, WorldRenderData& renderData, 
   for (int x = chunkRange.xMin(); x < chunkRange.xMax(); ++x) {
     for (int y = chunkRange.yMin(); y < chunkRange.yMax(); ++y) {
       size_t index = i++;
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "tiles: terrain chunk");
       m_pendingTerrainChunks[index] = getTerrainChunk(renderData, {x, y}, renderDirectives.terrainLayers);
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "tiles: liquid chunk");
       m_pendingLiquidChunks[index] = getLiquidChunk(renderData, {x, y}, renderDirectives.liquids);
     }
   }
@@ -168,6 +173,7 @@ size_t TilePainter::TextureKeyHash::operator()(TextureKey const& key) const {
 }
 
 TilePainter::ChunkHash TilePainter::terrainChunkHash(WorldRenderData& renderData, Vec2I chunkIndex) {
+  STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::TileHash,"terrain",0,true);
   //XXHash3 hasher;
   static ByteArray buffer;
   buffer.clear();
@@ -182,6 +188,7 @@ TilePainter::ChunkHash TilePainter::terrainChunkHash(WorldRenderData& renderData
 }
 
 TilePainter::ChunkHash TilePainter::liquidChunkHash(WorldRenderData& renderData, Vec2I chunkIndex) {
+  STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::TileHash,"liquid",0,true);
   ///XXHash3 hasher;
   RectI tileRange = RectI::withSize(chunkIndex * RenderChunkSize, Vec2I::filled(RenderChunkSize)).padded(MaterialRenderProfileMaxNeighborDistance);
   static ByteArray buffer;
@@ -220,7 +227,11 @@ void TilePainter::renderTerrainChunks(WorldCamera const& camera, TerrainLayer te
 
 shared_ptr<TilePainter::TerrainChunk const> TilePainter::getTerrainChunk(WorldRenderData& renderData, Vec2I chunkIndex, TerrainLayerDirectives const& renderDirectives) {
   pair<Vec2I, ChunkHash> chunkKey = {chunkIndex, terrainChunkHash(renderData, chunkIndex)};
-  return m_terrainChunkCache.get(chunkKey, [&](auto const&) {
+  bool rebuilt=false;
+  auto result=m_terrainChunkCache.get(chunkKey, [&](auto const&) {
+    rebuilt=true;
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TerrainMiss);
+    STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::TerrainBuild);
     HashMap<TerrainLayer, HashMap<QuadZLevel, List<RenderPrimitive>>> terrainPrimitives;
 
     RectI tileRange = RectI::withSize(chunkIndex * RenderChunkSize, Vec2I::filled(RenderChunkSize));
@@ -235,6 +246,7 @@ shared_ptr<TilePainter::TerrainChunk const> TilePainter::getTerrainChunk(WorldRe
 
     auto chunk = make_shared<TerrainChunk>();
 
+    STAR_EXPLORATION_SCOPE(bufferTrace,Switch2ExplorationProfile::Kind::TerrainBuffer);
     for (auto& layerPair : terrainPrimitives) {
       for (auto& zLevelPair : layerPair.second) {
         auto rb = m_renderer->createRenderBuffer();
@@ -245,11 +257,17 @@ shared_ptr<TilePainter::TerrainChunk const> TilePainter::getTerrainChunk(WorldRe
 
     return chunk;
   });
+  if(!rebuilt)STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TerrainHit);
+  return result;
 }
 
 shared_ptr<TilePainter::LiquidChunk const> TilePainter::getLiquidChunk(WorldRenderData& renderData, Vec2I chunkIndex, String const& renderDirectives) {
   pair<Vec2I, ChunkHash> chunkKey = {chunkIndex, liquidChunkHash(renderData, chunkIndex)};
-  return m_liquidChunkCache.get(chunkKey, [&](auto const&) {
+  bool rebuilt=false;
+  auto result=m_liquidChunkCache.get(chunkKey, [&](auto const&) {
+    rebuilt=true;
+    STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::LiquidMiss);
+    STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::LiquidBuild);
     HashMap<LiquidId, List<RenderPrimitive>> liquidPrimitives;
 
     RectI tileRange = RectI::withSize(chunkIndex * RenderChunkSize, Vec2I::filled(RenderChunkSize));
@@ -268,6 +286,8 @@ shared_ptr<TilePainter::LiquidChunk const> TilePainter::getLiquidChunk(WorldRend
 
     return chunk;
   });
+  if(!rebuilt)STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::LiquidHit);
+  return result;
 }
 
 bool TilePainter::produceTerrainPrimitives(HashMap<QuadZLevel, List<RenderPrimitive>>& primitives,
@@ -315,15 +335,30 @@ bool TilePainter::produceTerrainPrimitives(HashMap<QuadZLevel, List<RenderPrimit
     return false;
 
   auto getPieceTexture = [this, assets, &renderDirectives](MaterialId material, MaterialRenderPieceConstPtr const& piece, MaterialHue hue, bool mod) {
-    return m_textureCache.get(MaterialPieceTextureKey(material, piece->pieceId, hue, mod), [&](auto const&) {
+    bool missed=false,created=false;
+    // Pieces select subrectangles of the complete sheet. Identical resolved
+    // image paths (including hue/directives) can share the same atlas placement.
+    // Preserve the small piece key for the frequent cached draw path.
+    auto result=cachedAlias(m_textureCache,TextureKey(MaterialPieceTextureKey(material,piece->pieceId,hue,mod)),[&] {
+      missed=true;
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TileTextureMiss);
       String texture;
       if (hue == 0)
         texture = strf("{}?{}", piece->texture, renderDirectives);
       else
         texture = strf("{}?hueshift={}?{}", piece->texture, materialHueToDegrees(hue), renderDirectives);
-
-      return m_textureGroup->create(*assets->image(texture));
+      return TextureKey(AssetTextureKey(std::move(texture)));
+    },[&](TextureKey const& key) {
+      created=true;
+      auto const& texture=key.get<AssetTextureKey>();
+      STAR_EXPLORATION_SCOPE(imageTrace,Switch2ExplorationProfile::Kind::TileImage,texture.utf8Ptr());
+      auto image=assets->image(texture);
+      imageTrace.stop();
+      STAR_EXPLORATION_SCOPE(textureTrace,Switch2ExplorationProfile::Kind::TileTexture,texture.utf8Ptr(),uint64_t(image->width())*image->height()*4);
+      return m_textureGroup->create(*image);
     });
+    if(missed&&!created)STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TileTextureReuse);
+    return result;
   };
 
   auto materialRenderProfile = materialDatabase->materialRenderProfile(material);

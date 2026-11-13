@@ -1,0 +1,3 @@
+#pragma once
+#define STAR_COMPARE_SDK "@STAR_COMPARE_SDK@"
+#define STAR_COMPARE_CPU "@STAR_COMPARE_CPU@"

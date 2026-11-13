@@ -252,7 +252,7 @@ void ItemDrop::update(float dt, uint64_t) {
   }
 
   if (world()->isClient()) {
-    SpatialLogger::logPoly("world",
+    STAR_SPATIAL_LOG(logPoly, "world",
         m_movementController.collisionBody(),
         (canTake() ? Color::Green : Color::Red).toRgba());
   }

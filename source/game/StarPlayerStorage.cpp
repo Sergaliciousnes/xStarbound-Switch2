@@ -1,4 +1,7 @@
 #include "StarPlayerStorage.hpp"
+#include "StarPersistedSnapshot.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarConfiguration.hpp"
 #include "StarEntityFactory.hpp"
@@ -183,6 +186,7 @@ List<Uuid> PlayerStorage::playerUuidListByName(String const& name, Maybe<Uuid> e
 }
 
 Json PlayerStorage::savePlayer(PlayerPtr const& player) {
+  Switch2FrameProfile::Zone saveZone(Switch2FrameProfile::Phase::StorageSave);
   auto entityFactory = Root::singleton().entityFactory();
   auto versioningDatabase = Root::singleton().versioningDatabase();
 
@@ -193,7 +197,11 @@ Json PlayerStorage::savePlayer(PlayerPtr const& player) {
   auto& playerCacheData = m_savedPlayersCache[uuid];
   if (!m_playerFileNames.hasLeftValue(uuid))
     m_playerFileNames.insert(uuid, uuid.hex());
-  auto newPlayerData = player->diskStore();
+  Json newPlayerData;
+  {
+    Switch2FrameProfile::Zone serializeZone(Switch2FrameProfile::Phase::PlayerSerialize);
+    newPlayerData = player->diskStore();
+  }
   if (playerCacheData != newPlayerData) {
     playerCacheData = newPlayerData;
     VersionedJson versionedJson = entityFactory->storeVersionedJson(EntityType::Player, playerCacheData);
@@ -348,7 +356,15 @@ void PlayerStorage::writeMetadata() {
   m_metadata["order"] = std::move(order);
 
   String filename = File::relativeTo(m_storageDirectory, "metadata");
+#ifdef STAR_SYSTEM_SWITCH2
+  bool wrote=persistChanged(m_persistedMetadata,m_metadata,[&]{return File::isFile(filename);},[&](JsonObject const& value) {
+    File::overwriteFileWithRename(Json(value).printJson(0),filename);
+  });
+  if(wrote) {STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::MetadataWritten);}
+  else {STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::MetadataSkipped);}
+#else
   File::overwriteFileWithRename(Json(m_metadata).printJson(0), filename);
+#endif
 }
 
 } // namespace Star

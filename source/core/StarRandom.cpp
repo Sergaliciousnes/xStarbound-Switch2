@@ -1,7 +1,19 @@
+#include "StarSwitch2RandomWait.hpp"
 #include "StarRandom.hpp"
 #include "StarThread.hpp"
 #include "StarTime.hpp"
 #include "StarMathCommon.hpp"
+
+// Keep the original lock lifetime. Only sparse main-thread samples try first;
+// all other calls acquire the same mutex through the normal path.
+#define STAR_RANDOM_LOCK \
+  auto randomWaitStart = Switch2WaitProfile::beginRandomWait(); \
+  bool randomContended = false; \
+  MutexLocker locker(g_randMutex, false); \
+  if (randomWaitStart) { \
+    if (!locker.tryLock()) { randomContended = true; locker.lock(); } \
+  } else { locker.lock(); } \
+  Switch2WaitProfile::endRandomWait(randomWaitStart, randomContended)
 
 namespace Star {
 
@@ -213,131 +225,131 @@ namespace Random {
   }
 
   void init() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     doInit(produceRandomSeed());
   }
 
   void init(uint64_t seed) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     doInit(seed);
   }
 
   void addEntropy() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     g_randSource->addEntropy(produceRandomSeed());
   }
 
   void addEntropy(uint64_t seed) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     g_randSource->addEntropy(seed);
   }
 
   uint32_t randu32() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randu32();
   }
 
   uint64_t randu64() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randu64();
   }
 
   int32_t randi32() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randi32();
   }
 
   int64_t randi64() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randi64();
   }
 
   float randf() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randf();
   }
 
   double randd() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randd();
   }
 
   float randf(float min, float max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randf(min, max);
   }
 
   double randd(double min, double max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randd(min, max);
   }
 
   bool randb() {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randb();
   }
 
   long long randInt(long long max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randInt(max);
   }
 
   unsigned long long randUInt(unsigned long long max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randUInt(max);
   }
 
   long long randInt(long long min, long long max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randInt(min, max);
   }
 
   unsigned long long randUInt(unsigned long long min, unsigned long long max) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randUInt(min, max);
   }
 
   float nrandf(float stddev, float mean) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->nrandf(stddev, mean);
   }
 
   double nrandd(double stddev, double mean) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->nrandd(stddev, mean);
   }
 
   int64_t stochasticRound(double val) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->stochasticRound(val);
   }
 
   void randBytes(char* buf, size_t len) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     g_randSource->randBytes(buf, len);
   }
 
   ByteArray randBytes(size_t len) {
-    MutexLocker locker(g_randMutex);
+    STAR_RANDOM_LOCK;
     checkInit();
     return g_randSource->randBytes(len);
   }

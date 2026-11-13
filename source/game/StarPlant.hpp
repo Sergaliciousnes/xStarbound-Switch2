@@ -99,6 +99,9 @@ public:
   void update(float dt, uint64_t currentStep) override;
 
   void render(RenderCallback* renderCallback) override;
+  // Skip only visual pieces; damage particles/audio are still processed.
+  void render(RenderCallback* renderCallback, bool drawVisuals);
+  RectF visualBoundBox() const;
 
   bool damageTiles(List<Vec2I> const& position, Vec2F const& sourcePosition, TileDamage const& tileDamage) override;
 
@@ -158,6 +161,7 @@ private:
   float m_windLevel;
 
   RectF m_metaBoundBox;
+  RectF m_visualBoundBox = RectF::null();
 
   bool m_piecesScanned;
 

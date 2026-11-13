@@ -320,7 +320,7 @@ void Vehicle::update(float dt, uint64_t) {
     m_scriptedAnimator.update();
 
   if (world()->isClient())
-    SpatialLogger::logPoly("world", m_movementController.collisionBody(), {255, 255, 0, 255});
+    STAR_SPATIAL_LOG(logPoly, "world", m_movementController.collisionBody(), {255, 255, 0, 255});
 }
 
 void Vehicle::render(RenderCallback* renderer) {

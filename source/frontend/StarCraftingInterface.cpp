@@ -1,4 +1,5 @@
 #include "StarCraftingInterface.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarButtonWidget.hpp"
 #include "StarConfiguration.hpp"
@@ -30,6 +31,7 @@
 namespace Star {
 
 CraftingPane::CraftingPane(WorldClientPtr worldClient, PlayerPtr player, Json const& settings, EntityId sourceEntityId) {
+  STAR_EXPLORATION_SCOPE(paneBuild,Switch2ExplorationProfile::Kind::UiPaneBuild,"crafting");
   m_worldClient = std::move(worldClient);
   m_player = std::move(player);
   m_blueprints = m_player->blueprints();

@@ -1,6 +1,8 @@
 # This file defines the basic install layout of Starbound for each operating system.
 
-if(STAR_SYSTEM_WINDOWS)
+if(STAR_SYSTEM_SWITCH2)
+    set(STAR_CONFIG_FILE_TEMPLATE "${PROJECT_SOURCE_DIR}/scripts/linux/xsbinit.config.in")
+elseif(STAR_SYSTEM_WINDOWS)
     set(STAR_CONFIG_FILE_TEMPLATE "${PROJECT_SOURCE_DIR}/scripts/windows/xsbinit.config.in")
 elseif(STAR_SYSTEM_MACOS)
     set(STAR_CONFIG_FILE_TEMPLATE "${PROJECT_SOURCE_DIR}/scripts/osx/xsbinit.config.in")
@@ -16,17 +18,25 @@ elseif(STAR_SYSTEM_LINUX OR STAR_SYSTEM_FAMILY_UNIX)
 endif()
 
 # Create configuration files for installation & development
-if(STAR_SYSTEM_MACOS)
+if(STAR_SYSTEM_SWITCH2)
+    set(XSB_RES_BASE_DIR ".")
+elseif(STAR_SYSTEM_MACOS)
     set(XSB_RES_BASE_DIR "../Resources")
 else()
     set(XSB_RES_BASE_DIR "..")
 endif()
 configure_file(${STAR_CONFIG_FILE_TEMPLATE} ${PROJECT_BINARY_DIR}/xsbinit.config @ONLY)
-set(XSB_RES_BASE_DIR "${STAR_GAME_RESOURCE_BASE_DIR}")
+if(NOT STAR_SYSTEM_SWITCH2)
+    set(XSB_RES_BASE_DIR "${STAR_GAME_RESOURCE_BASE_DIR}")
+endif()
 configure_file(${STAR_CONFIG_FILE_TEMPLATE} ${PROJECT_BINARY_DIR}/xsbinit.config.build @ONLY)
 
 # Define install paths for use in targets
-if(STAR_SYSTEM_WINDOWS)
+if(STAR_SYSTEM_SWITCH2)
+    set(STAR_INSTALL_BINDIR .)
+    set(STAR_INSTALL_LIBDIR .)
+    set(STAR_INSTALL_DATADIR .)
+elseif(STAR_SYSTEM_WINDOWS)
 
     if(STAR_ARCHITECTURE STREQUAL "x86_64")
         set(STAR_INSTALL_BINDIR xsb-win64)

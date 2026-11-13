@@ -1545,15 +1545,15 @@ namespace LuaBindings {
   }
 
   void WorldDebugCallbacks::debugPoint(Vec2F const& arg1, Color const& arg2) {
-    SpatialLogger::logPoint("world", arg1, arg2.toRgba());
+    STAR_SPATIAL_LOG(logPoint, "world", arg1, arg2.toRgba());
   }
 
   void WorldDebugCallbacks::debugLine(Vec2F const& arg1, Vec2F const& arg2, Color const& arg3) {
-    SpatialLogger::logLine("world", arg1, arg2, arg3.toRgba());
+    STAR_SPATIAL_LOG(logLine, "world", arg1, arg2, arg3.toRgba());
   }
 
   void WorldDebugCallbacks::debugPoly(PolyF const& poly, Color const& color) {
-    SpatialLogger::logPoly("world", poly, color.toRgba());
+    STAR_SPATIAL_LOG(logPoly, "world", poly, color.toRgba());
   }
 
   void WorldDebugCallbacks::debugText(LuaEngine& engine, LuaVariadic<LuaValue> const& args) {
@@ -1564,7 +1564,7 @@ namespace LuaBindings {
     Vec4B const color = engine.luaTo<Color>(args.at(args.size() - 1)).toRgba();
 
     String text = formatLua(engine.luaTo<String>(args.at(0)), slice<List<LuaValue>>(args, 1, args.size() - 2));
-    SpatialLogger::logText("world", text, position, color);
+    STAR_SPATIAL_LOG(logText, "world", text, position, color);
   }
 
   LuaTable WorldEntityCallbacks::entityQuery(World* world, LuaEngine& engine, Vec2F const& pos1, LuaValue const& pos2, Maybe<LuaTable> options) {

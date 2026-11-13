@@ -1,4 +1,5 @@
 #include "StarBaseScriptPane.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarCanvasWidget.hpp"
 #include "StarConfigLuaBindings.hpp"
@@ -20,6 +21,7 @@ namespace Star {
 
 BaseScriptPane::BaseScriptPane(Json config, MainInterface* mainInterface, bool construct, bool removeHoakyChatCallbacks)
     : Pane(), m_rawConfig(config), m_removeHoakyChatCallbacks(removeHoakyChatCallbacks), m_mainInterface(mainInterface) {
+  STAR_EXPLORATION_SCOPE(paneBuild,Switch2ExplorationProfile::Kind::UiPaneBuild,"script-pane");
   auto& root = Root::singleton();
   auto assets = root.assets();
 

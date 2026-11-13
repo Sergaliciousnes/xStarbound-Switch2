@@ -1,6 +1,9 @@
 #include "StarUniverseServer.hpp"
+#include "StarSwitch2Diagnostics.hpp"
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarAiDatabase.hpp"
 #include "StarAssets.hpp"
+#include "StarBuffer.hpp"
 #include "StarBiomeDatabase.hpp"
 #include "StarCelestialDatabase.hpp"
 #include "StarChatProcessor.hpp"
@@ -264,6 +267,13 @@ void UniverseServer::stop() {
 }
 
 void UniverseServer::setPause(bool pause) {
+  Switch2WaitProfile::Scope waitPause(Switch2WaitProfile::Metric::LocalServerPause);
+  // The client repeats the unpaused request every frame. It needs no client
+  // list access when already unpaused; avoid waiting behind world-generation
+  // and server work that holds m_clientsLock. Changed/paused requests retain
+  // the locked multiplayer normalization below.
+  if (!pause && !*m_pause)
+    return;
   RecursiveMutexLocker clientsLocker(m_clientsLock);
   // Pausing is disabled for multiplayer
   if (m_clients.size() > 1)
@@ -632,6 +642,7 @@ void UniverseServer::run() {
   m_lastScriptUpdate = Time::monotonicTime();
 
   while (!m_stop) {
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "start server tick");
     ZoneScopedN("UNIVERSE SERVER TICK");
     if (m_tcpState == TcpState::Yes && !tcpServer) {
       ZoneScopedN("TCP initialisation");
@@ -673,7 +684,7 @@ void UniverseServer::run() {
       tcpServer.reset();
     }
 
-    LogMap::set("universe_time", m_universeClock->time());
+    STAR_LOG_MAP_SET("universe_time", m_universeClock->time());
 
     try {
       ZoneScopedN("Server update tick");
@@ -681,21 +692,28 @@ void UniverseServer::run() {
       removeTimedBan();
       sendPendingChat();
       updateTeams();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "update ships");
       updateShips();
       sendClockUpdates();
       kickErroredPlayers();
       reapConnections();
       processPlanetTypeChanges();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "warp players");
       warpPlayers();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "fly ships / starter selection");
       flyShips();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "arrive ships");
       arriveShips();
       processChat();
       sendClientContextUpdates();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "respond celestial requests");
       respondToCelestialRequests();
       clearBrokenWorlds();
       handleWorldMessages();
       shutdownInactiveWorlds();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "triggered storage");
       doTriggeredStorage();
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "command script");
       updateCommandScript((float)(Time::monotonicTime() - m_lastScriptUpdate));
       updateSecuritySettings();
       m_lastScriptUpdate = Time::monotonicTime();
@@ -703,6 +721,8 @@ void UniverseServer::run() {
       Logger::error("UniverseServer: exception caught: {}", outputException(e, true));
     }
 
+    Switch2Diagnostics::count(Switch2Diagnostics::Counter::ServerTicks);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Server, "server idle");
     Thread::sleep(mainWakeupInterval);
   }
 
@@ -1608,6 +1628,7 @@ Maybe<CelestialCoordinate> UniverseServer::nextStarterWorld() {
       };
 
       auto findParameters = assets->json("/universe_server.config:findStarterWorldParameters");
+      Logger::info("UniverseServer: Starter search parameters: tries {}, range {}", findParameters.getUInt("tries"), findParameters.getUInt("range"));
       auto randomWorld = celestialDatabase->findRandomWorld(findParameters.getUInt("tries"), findParameters.getUInt("range"), [&](CelestialCoordinate const& coordinate) {
         if (!filterWorld(coordinate, findParameters.get("starterWorld")))
           return false;
@@ -2562,7 +2583,12 @@ Maybe<WorkerPoolPromise<WorldServerThreadPtr>> UniverseServer::shipWorldPromise(
 
     if (!shipWorld) {
       Logger::info("UniverseServer: Creating new client ship world {}", clientShipWorldId);
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_RAM_SHIP_STORAGE)
+      shipWorld = makeObject<WorldServer>(Vec2U(2048, 2048), make_shared<Buffer>());
+      Logger::info("UniverseServer: new disposable ship working database uses RAM");
+#else
       shipWorld = makeObject<WorldServer>(Vec2U(2048, 2048), File::ephemeralFile());
+#endif
       shipWorld->init(true);
       auto shipStructure = WorldStructure(speciesShips.get(clientContext->playerSpecies()).first());
       shipStructure = shipWorld->setCentralStructure(shipStructure);

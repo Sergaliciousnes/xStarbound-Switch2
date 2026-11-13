@@ -1,3 +1,4 @@
+#include "StarSwitch2WaitProfile.hpp"
 #ifndef STAR_SECTOR_SET_HPP
 #define STAR_SECTOR_SET_HPP
 
@@ -5,6 +6,7 @@
 #include "StarSet.hpp"
 #include "StarVector.hpp"
 #include "StarWorkerPool.hpp"
+#include "StarThread.hpp"
 
 #include "thread"
 
@@ -462,6 +464,7 @@ bool SectorArray2D<ElementT, SectorSize>::evalColumnsPrivPar(
       return true; // FezzedOne: Added missing return.
     }));
   }
+  Switch2WaitProfile::Scope finishWait(Switch2WaitProfile::Metric::SectorWait);
   for (const auto& f : futures) {
     f.finish();
   }
@@ -471,7 +474,13 @@ bool SectorArray2D<ElementT, SectorSize>::evalColumnsPrivPar(
 
 template <typename ElementT, size_t SectorSize>
 WorkerPool& SectorArray2D<ElementT, SectorSize>::getWorkerPool() const {
-  static WorkerPool pool("SectorArray2DWorkerPool", std::thread::hardware_concurrency());
+  // A zero result means the CPU count is unknown (including devkitA64's
+  // runtime), not that queued work can run without any worker threads.
+#ifdef STAR_SYSTEM_SWITCH2
+  static WorkerPool pool("SectorArray2DWorkerPool", std::max(1u, Thread::numberOfProcessors()));
+#else
+  static WorkerPool pool("SectorArray2DWorkerPool", std::max(1u, std::thread::hardware_concurrency()));
+#endif
   return pool;
 }
 

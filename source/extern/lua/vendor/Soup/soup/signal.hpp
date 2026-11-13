@@ -10,11 +10,15 @@ NAMESPACE_SOUP
 	{
 		static void handle(int signum, void(*fp)(int signum))
 		{
+#ifdef __SWITCH2__
+            ::signal(signum, fp);
+#else
 			struct sigaction s;
 			s.sa_handler = fp;
 			sigemptyset(&s.sa_mask);
 			s.sa_flags = 0;
 			sigaction(signum, &s, nullptr);
+#endif
 		}
 	};
 }

@@ -252,6 +252,9 @@ void TextBoxWidget::mouseOver() {
 }
 
 void TextBoxWidget::mouseOut() {
+#ifdef STAR_SYSTEM_SWITCH2
+  m_textEditArmed=false;
+#endif
   Widget::mouseOut();
   m_isHover = false;
   m_isPressed = false;
@@ -264,6 +267,9 @@ void TextBoxWidget::mouseReturnStillDown() {
 }
 
 void TextBoxWidget::blur() {
+#ifdef STAR_SYSTEM_SWITCH2
+  m_textEditArmed=false;
+#endif
   Widget::blur();
   if (m_onBlur)
     m_onBlur(this);
@@ -295,6 +301,19 @@ bool TextBoxWidget::sendEvent(InputEvent const& event) {
 }
 
 bool TextBoxWidget::innerSendEvent(InputEvent const& event) {
+#ifdef STAR_SYSTEM_SWITCH2
+  if (auto pressed=event.ptr<MouseButtonDownEvent>())
+    m_textEditArmed=pressed->mouseButton==MouseButton::Left;
+  if (auto released=event.ptr<MouseButtonUpEvent>()) {
+    bool edit=m_textEditArmed && released->mouseButton==MouseButton::Left && m_isHover;
+    m_textEditArmed=false;
+    if (edit) {
+      if (auto edited=context()->applicationController()->editText(m_text,m_textHidden))
+        setText(*edited,false,true);
+      return true;
+    }
+  }
+#endif
   if (auto keyDown = event.ptr<KeyDownEvent>()) {
     m_repeatKeyThreshold = Time::monotonicMilliseconds() + 300LL;
 

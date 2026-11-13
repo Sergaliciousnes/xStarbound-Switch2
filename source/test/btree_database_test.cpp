@@ -1,10 +1,15 @@
 #include "StarBTreeDatabase.hpp"
 #include "StarFile.hpp"
 #include "StarRandom.hpp"
+#include "btree_cache_regression.hpp"
 
 #include "gtest/gtest.h"
 
 using namespace Star;
+
+TEST(BTreeDatabaseTest, ReadBlockCacheCoherence) {
+  checkBTreeReadCacheRegression();
+}
 
 namespace {
   size_t const RandFactor = 0xd5a2f037;

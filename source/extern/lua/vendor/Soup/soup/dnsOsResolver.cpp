@@ -6,7 +6,7 @@
 #undef UNICODE
 #include "windns.h"
 #pragma comment(lib, "dnsapi.lib")
-#else
+#elif !defined(__SWITCH2__)
 #include <resolv.h>
 
 #include "dnsClass.hpp" // for DNS_IN because C_IN is not available on MacOS, not even in <arpa/nameser.h>
@@ -21,7 +21,11 @@ NAMESPACE_SOUP
 
 	Optional<std::vector<UniquePtr<dnsRecord>>> dnsOsResolver::staticLookup(dnsType qtype, const std::string& name)
 	{
-#if SOUP_WINDOWS
+#if defined(__SWITCH2__)
+        // No libresolv record-query API on Horizon. Report lookup failure so
+        // Soup can use its other resolvers; never synthesize DNS records.
+        return std::nullopt;
+#elif SOUP_WINDOWS
 		PDNS_RECORD pDnsRecord;
 		if (DnsQuery_UTF8(name.c_str(), qtype, DNS_QUERY_STANDARD, 0, &pDnsRecord, 0) == ERROR_SUCCESS)
 		{

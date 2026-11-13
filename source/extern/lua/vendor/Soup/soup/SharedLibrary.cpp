@@ -38,6 +38,9 @@ NAMESPACE_SOUP
 	{
 #if SOUP_WINDOWS
 		handle = LoadLibraryA(path);
+#elif defined(__SWITCH2__)
+        // Horizon NROs do not support the desktop shared-library loader.
+        handle = nullptr;
 #else
 		handle = dlopen(path, RTLD_LAZY);
 #endif
@@ -50,6 +53,8 @@ NAMESPACE_SOUP
 		{
 #if SOUP_WINDOWS
 			FreeLibrary(handle);
+#elif defined(__SWITCH2__)
+            // load() never creates a handle on Horizon.
 #else
 			dlclose(handle);
 #endif
@@ -70,6 +75,8 @@ NAMESPACE_SOUP
 		}
 #if SOUP_WINDOWS
 		return (void*)GetProcAddress(handle, name);
+#elif defined(__SWITCH2__)
+        return nullptr;
 #else
 		return dlsym(handle, name);
 #endif

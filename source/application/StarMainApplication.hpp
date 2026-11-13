@@ -45,7 +45,28 @@ namespace Star {
 
 #else
 
-#if defined STAR_USE_RPMALLOC
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_GAME_RPMALLOC)
+#include "StarSwitch2GameAllocator.hpp"
+#ifdef STAR_SWITCH2_TIMING_DISABLED
+// Retain an actionable startup error without enabling allocator snapshots.
+#define STAR_SWITCH2_ALLOCATOR_FAILURE() do { \
+    if (FILE* allocatorFailureLog=std::fopen("sdmc:/xstarbound-stderr.log","w")) { \
+      std::fputs("xStarbound: game allocator initialization failed.\n",allocatorFailureLog); \
+      std::fclose(allocatorFailureLog); \
+    } \
+  } while(0)
+#define STAR_SWITCH2_ALLOCATOR_REPORT_EXIT() ((void)0)
+#else
+#define STAR_SWITCH2_ALLOCATOR_FAILURE() Star::Switch2GameAllocator::reportFile("initialization-failed",false)
+#define STAR_SWITCH2_ALLOCATOR_REPORT_EXIT() Star::Switch2GameAllocator::reportFile("after-run",true)
+#endif
+#define STAR_MAIN_APPLICATION(ApplicationClass) \
+  int main(int argc,char** argv){ \
+    if(!Star::Switch2GameAllocator::initialize()){STAR_SWITCH2_ALLOCATOR_FAILURE();return 1;} \
+    int result=Star::runMainApplication(Star::make_unique<ApplicationClass>(),Star::StringList(argc,argv)); \
+    STAR_SWITCH2_ALLOCATOR_REPORT_EXIT();return result; \
+  }
+#elif defined STAR_USE_RPMALLOC
 
 #include "rpmalloc.h"
 

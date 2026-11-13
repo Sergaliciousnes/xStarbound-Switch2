@@ -1,3 +1,4 @@
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarPlayerInventory.hpp"
 #include "StarArmors.hpp"
 #include "StarAssets.hpp"
@@ -1296,6 +1297,7 @@ void PlayerInventory::netElementsNeedLoad(bool) {
 }
 
 void PlayerInventory::netElementsNeedStore() {
+  Switch2WaitProfile::Scope state(Switch2WaitProfile::Metric::InventoryState);
   cleanup();
 
   // auto const& playerIdentity = m_player->identity();

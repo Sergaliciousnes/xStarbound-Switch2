@@ -3,6 +3,9 @@
 
 #include "StarIODevice.hpp"
 #include "StarString.hpp"
+#ifdef STAR_SYSTEM_SWITCH2
+#include <mutex>
+#endif
 
 namespace Star {
 
@@ -143,6 +146,14 @@ private:
 
   String m_filename;
   void* m_file;
+#ifdef STAR_SWITCH2_IO_PROFILE
+  uint16_t m_ioProfileFile = 0;
+#endif
+#ifdef STAR_SYSTEM_SWITCH2
+  // Horizon implements positional I/O using seek/read/restore. Serialize every
+  // cursor operation on this File so asset streaming preserves pread semantics.
+  std::recursive_mutex m_positionMutex;
+#endif
 };
 
 }

@@ -1,4 +1,7 @@
+#include "StarSwitch2WaitProfile.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarAssetPath.hpp"
 #include "StarAudio.hpp"
 #include "StarCasting.hpp"
@@ -19,6 +22,7 @@
 #include "StarLuaConverters.hpp"
 #include "StarMemoryAssetSource.hpp"
 #include "StarPackedAssetSource.hpp"
+#include "StarSwitch2AssetStartupTrace.hpp"
 #include "StarRandom.hpp"
 #include "StarRootBase.hpp"
 #include "StarSha256.hpp"
@@ -320,8 +324,10 @@ Assets::Assets(Settings settings, StringList assetSources) {
   List<pair<String, AssetSourcePtr>> sources;
 
   auto addSource = [&](String const& sourcePath, AssetSourcePtr source) {
+    Switch2AssetStartupTrace::checkpoint("catalogue-merge-begin",sourcePath.utf8Ptr(),m_files.size());
     m_assetSourcePaths.add(sourcePath, source);
 
+    size_t merged=0;
     for (auto const& filename : source->assetPaths()) {
       if (filename.contains(AssetsPatchSuffix, String::CaseInsensitive)) {
         if (filename.endsWith(AssetsPatchSuffix, String::CaseInsensitive)) {
@@ -352,7 +358,10 @@ Assets::Assets(Settings settings, StringList assetSources) {
       descriptor.sourceName = filename;
       descriptor.source = source;
       m_filesByExtension[AssetPath::extension(filename).toLower()].insert(filename);
+      if((++merged%16384)==0)
+        Switch2AssetStartupTrace::checkpoint("catalogue-merge-progress",sourcePath.utf8Ptr(),merged,m_files.size());
     }
+    Switch2AssetStartupTrace::checkpoint("catalogue-merge-done",sourcePath.utf8Ptr(),merged,m_files.size());
   };
 
   auto runLoadScripts = [&](String const& groupName, String const& sourcePath, AssetSourcePtr source, List<pair<String, AssetSourcePtr>> const& sources) {
@@ -548,12 +557,15 @@ Assets::Assets(Settings settings, StringList assetSources) {
     sources.append(make_pair(sourcePath, source));
 
     runLoadScripts("onLoad", sourcePath, source, sources);
+    Switch2AssetStartupTrace::checkpoint("source-onload-done",sourcePath.utf8Ptr(),m_files.size());
   }
 
+  Switch2AssetStartupTrace::checkpoint("postload-begin","",m_files.size());
   for (auto& pair : sources)
     runLoadScripts("postLoad", pair.first, pair.second, sources);
 
   Sha256Hasher digest;
+  Switch2AssetStartupTrace::checkpoint("digest-begin","",m_files.size());
 
   for (auto const& assetPath : m_files.keys().sorted()) {
     bool digestFile = true;
@@ -575,6 +587,7 @@ Assets::Assets(Settings settings, StringList assetSources) {
   }
 
   m_digest = digest.compute();
+  Switch2AssetStartupTrace::checkpoint("digest-done","",m_files.size());
 
   for (auto const& filename : m_files.keys())
     m_filesByExtension[AssetPath::extension(filename).toLower()].add(filename);
@@ -951,7 +964,10 @@ void Assets::clearCache() {
 }
 
 void Assets::cleanup() {
+  Switch2WaitProfile::Background wait("assets-cleanup-lock");
   MutexLocker assetsLocker(m_assetsMutex);
+  wait.stop();
+  Switch2WaitProfile::Background held("assets-cleanup-held");
 
   double time = Time::monotonicTime();
 
@@ -1163,7 +1179,11 @@ shared_ptr<Assets::AssetData> Assets::tryAsset(AssetId const& id, bool forcePers
 }
 
 shared_ptr<Assets::AssetData> Assets::getAsset(AssetId const& id, bool forcePersistence) const {
-  MutexLocker assetsLocker(m_assetsMutex);
+  Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::AssetLock);
+  MutexLocker assetsLocker(m_assetsMutex, false);
+  Switch2WaitProfile::acquire(assetsLocker, Switch2WaitProfile::Metric::AssetContended);
+  lockWait.stop();
+  Switch2WaitProfile::Scope work(Switch2WaitProfile::Metric::AssetWork);
 
   while (true) {
     auto j = m_assetsCache.find(id);
@@ -1179,8 +1199,19 @@ shared_ptr<Assets::AssetData> Assets::getAsset(AssetId const& id, bool forcePers
     } else {
       // Try to load the asset in-thread, if we cannot, then the asset has been
       // queued so wait for a worker thread to finish it.
-      if (!doLoad(id, forcePersistence))
+      ZoneScopedN("Assets synchronous cache miss");
+      STAR_EXPLORATION_SCOPE(missTrace,Switch2ExplorationProfile::Kind::AssetMiss,id.path.basePath.utf8Ptr());
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::AssetMisses);
+      Switch2FrameProfile::Zone assetZone(Switch2FrameProfile::Phase::AssetMiss);
+#ifdef TRACY_ENABLE
+      ZoneTextF("%s", id.path.basePath.utf8().c_str());
+#endif
+      if (!doLoad(id, forcePersistence)) {
+        ZoneScopedN("Assets wait for loader");
+        STAR_EXPLORATION_SCOPE(loaderTrace,Switch2ExplorationProfile::Kind::AssetWait,id.path.basePath.utf8Ptr());
+        Switch2WaitProfile::Scope loaderWait(Switch2WaitProfile::Metric::AssetLoaderWait);
         m_assetsDone.wait(m_assetsMutex);
+      }
     }
   }
 }
@@ -1578,6 +1609,7 @@ shared_ptr<Assets::AssetData> Assets::loadAsset(AssetId const& id, bool forcePer
 
   try {
     m_queue[id] = QueuePriority::Working;
+    STAR_EXPLORATION_SCOPE(loadTrace,Switch2ExplorationProfile::Kind::AssetLoad,id.path.basePath.utf8Ptr());
     shared_ptr<AssetData> assetData;
 
     try {
@@ -1665,6 +1697,7 @@ shared_ptr<Assets::AssetData> Assets::loadJson(AssetPath const& path) const {
 }
 
 shared_ptr<Assets::AssetData> Assets::loadImage(AssetPath const& path) const {
+  STAR_EXPLORATION_SCOPE(imageTrace,Switch2ExplorationProfile::Kind::ImageLoad,path.basePath.utf8Ptr());
   validatePath(path, true, true);
   if (!path.directives.empty()) {
     shared_ptr<ImageData> source =

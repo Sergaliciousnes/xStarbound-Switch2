@@ -5,7 +5,7 @@
 
 #include <cctype>
 #if defined STAR_COMPILER_GNU || STAR_COMPILER_CLANG
-#ifdef STAR_SYSTEM_FAMILY_UNIX
+#if defined(STAR_SYSTEM_FAMILY_UNIX) && !defined(STAR_SYSTEM_SWITCH2)
 #include <regex.h>
 #else
 #include <regex>
@@ -733,7 +733,7 @@ bool String::contains(String const& s, CaseSensitivity cs) const {
 
 bool String::regexMatch(String const& regex, bool full, bool caseSensitive) const {
 #if defined STAR_COMPILER_GNU || STAR_COMPILER_CLANG
-#ifdef STAR_SYSTEM_FAMILY_UNIX
+#if defined(STAR_SYSTEM_FAMILY_UNIX) && !defined(STAR_SYSTEM_SWITCH2)
   String adjustedRegex = full ? ("^" + regex + "$") : regex;   // FezzedOne: Looks slightly hacky, but doubled `^` and `$` modifiers are ignored in POSIX regexes.
   adjustedRegex = adjustedRegex.replace("\\d", "[[:digit:]]"); // FezzedOne: Another hack because the vanilla assets require support for `\d`.
 

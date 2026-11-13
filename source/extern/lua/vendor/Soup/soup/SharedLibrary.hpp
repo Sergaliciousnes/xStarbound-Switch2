@@ -4,7 +4,7 @@
 
 #if SOUP_WINDOWS
 #include <windows.h>
-#else
+#elif !defined(__SWITCH2__)
 #include <dlfcn.h>
 #endif
 

@@ -160,15 +160,15 @@ void ActiveItem::update(float dt, FireMode fireMode, bool shifting, HashSet<Move
   for (auto shieldPoly : shieldPolys()) {
     shieldPoly.translate(owner()->position());
     if (isClient)
-      SpatialLogger::logPoly("world", shieldPoly, {255, 255, 0, 255});
+      STAR_SPATIAL_LOG(logPoly, "world", shieldPoly, {255, 255, 0, 255});
   }
 
   if (isClient) {
     for (auto forceRegion : forceRegions()) {
       if (auto dfr = forceRegion.ptr<DirectionalForceRegion>())
-        SpatialLogger::logPoly("world", dfr->region, {155, 0, 255, 255});
+        STAR_SPATIAL_LOG(logPoly, "world", dfr->region, {155, 0, 255, 255});
       else if (auto rfr = forceRegion.ptr<RadialForceRegion>())
-        SpatialLogger::logPoint("world", rfr->center, {155, 0, 255, 255});
+        STAR_SPATIAL_LOG(logPoint, "world", rfr->center, {155, 0, 255, 255});
     }
   }
 }

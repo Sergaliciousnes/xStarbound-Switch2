@@ -97,9 +97,9 @@ void Stagehand::update(float dt, uint64_t) {
 
   if (world()->isClient()) {
     auto boundBox = metaBoundBox().translated(position());
-    SpatialLogger::logPoly("world", PolyF(boundBox), {0, 255, 255, 255});
-    SpatialLogger::logLine("world", boundBox.min(), boundBox.max(), {0, 255, 255, 255});
-    SpatialLogger::logLine("world", {boundBox.xMin(), boundBox.yMax()}, {boundBox.xMax(), boundBox.yMin()}, {0, 255, 255, 255});
+    STAR_SPATIAL_LOG(logPoly, "world", PolyF(boundBox), {0, 255, 255, 255});
+    STAR_SPATIAL_LOG(logLine, "world", boundBox.min(), boundBox.max(), {0, 255, 255, 255});
+    STAR_SPATIAL_LOG(logLine, "world", {boundBox.xMin(), boundBox.yMax()}, {boundBox.xMax(), boundBox.yMin()}, {0, 255, 255, 255});
   }
 }
 

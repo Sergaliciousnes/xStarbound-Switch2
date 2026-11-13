@@ -1,4 +1,5 @@
 #include "StarInventory.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarArmors.hpp"
 #include "StarAssets.hpp"
 #include "StarAugmentItem.hpp"
@@ -27,6 +28,7 @@
 namespace Star {
 
 InventoryPane::InventoryPane(MainInterface* parent, PlayerPtr player, ContainerInteractorPtr containerInteractor) {
+  STAR_EXPLORATION_SCOPE(paneBuild,Switch2ExplorationProfile::Kind::UiPaneBuild,"inventory");
   m_parent = parent;
   m_player = std::move(player);
   m_containerInteractor = std::move(containerInteractor);

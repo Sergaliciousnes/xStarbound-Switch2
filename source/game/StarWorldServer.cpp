@@ -1,4 +1,5 @@
 #include "StarWorldServer.hpp"
+#include "StarSwitch2SimulationProfile.hpp"
 #include "StarBiome.hpp"
 #include "StarBiomeDatabase.hpp"
 #include "StarContainerEntity.hpp"
@@ -953,7 +954,11 @@ void WorldServer::update(float dt) {
       const char* const entityTypeStr = EntityTypeNames.getRight(entity->entityType()).utf8().c_str();
       ZoneTextF("%s entity %i", entityTypeStr, entityId);
 #endif
-      entity->update(dt, m_currentStep);
+      STAR_SIM_ENTITY(entity->entityType()==EntityType::Npc ? 0u : entity->entityType()==EntityType::Object ? 1u : 2u);
+      {STAR_SIM_SCOPE(entityUpdate,entity->entityType()==EntityType::Npc ? Switch2SimulationProfile::Kind::EntityNpc :
+          entity->entityType()==EntityType::Object ? Switch2SimulationProfile::Kind::EntityObject : Switch2SimulationProfile::Kind::EntityOther);
+        entity->update(dt, m_currentStep);
+      }
 
       if (auto tileEntity = as<TileEntity>(entity)) {
         // Only do break checks on objects if all sectors the object touches
@@ -1063,10 +1068,10 @@ void WorldServer::update(float dt) {
 
   m_expiryTimer.tick(dt);
 
-  LogMap::set(strf("server_{}_entities", m_worldId), strf("{} in {} sectors", m_entityMap->size(), m_tileArray->loadedSectorCount()));
-  LogMap::set(strf("server_{}_time", m_worldId), strf("age = {:4.2f}, day = {:4.2f}/{:4.2f}s", epochTime(), timeOfDay(), dayLength()));
-  LogMap::set(strf("server_{}_active_liquid", m_worldId), m_liquidEngine->activeCells());
-  LogMap::set(strf("server_{}_lua_mem", m_worldId), m_luaRoot->luaMemoryUsage());
+  STAR_LOG_MAP_SET(strf("server_{}_entities", m_worldId), strf("{} in {} sectors", m_entityMap->size(), m_tileArray->loadedSectorCount()));
+  STAR_LOG_MAP_SET(strf("server_{}_time", m_worldId), strf("age = {:4.2f}, day = {:4.2f}/{:4.2f}s", epochTime(), timeOfDay(), dayLength()));
+  STAR_LOG_MAP_SET(strf("server_{}_active_liquid", m_worldId), m_liquidEngine->activeCells());
+  STAR_LOG_MAP_SET(strf("server_{}_lua_mem", m_worldId), m_luaRoot->luaMemoryUsage());
 }
 
 WorldGeometry WorldServer::geometry() const {

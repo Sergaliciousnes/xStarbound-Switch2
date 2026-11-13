@@ -1,3 +1,22 @@
+# xStarbound for Nintendo Switch 2
+
+**You must own Starbound on Steam to play.** Install the game, open Steam → Starbound → Manage → Browse local files, then copy `assets/packed.pak` from that legitimate installation to `sdmc:/switch/xstarbound/assets/packed.pak`. Retail game assets are not included in this repository or the tester package.
+
+This is Sergalicious's unofficial native Horizon port of [xStarbound](https://github.com/xStarbound/xStarbound), based on xStarbound 4.7.0.2 / Starbound 1.4.4. It uses Vulkan/OunceVK and libounce. The tested upstream base is `551562cf6cf59be0a0e9caea41e846d15febbda7`; newer upstream changes have not been merged into this port.
+
+- **Downloads:** [Switch 2 releases](https://github.com/Sergaliciousnes/xStarbound-Switch2/releases). Source publication may precede the first downloadable release.
+- **Installation, prerequisites, controls and mods:** [player README](doc/switch2-tester-readme.md).
+- **Build from source:** [Switch 2 build instructions](doc/switch2-build.md).
+- **Detailed controls:** [controller mapping](doc/switch2-controls.md).
+
+The current tester uses 1920×1080 output, the ownership-routed rpmalloc backend, asset/cache improvements and cached Lua bootstrap bytecode executed separately in each VM. Heavy profiling is disabled in the shared build; the FPS overlay remains available. Local gameplay, mod loading, saving and longer sessions have been tested by the port maintainer. Mod-specific performance and compatibility can vary; desktop features and multiplayer have not all been validated on Horizon.
+
+Use a Nintendo Switch 2 with a runtime compatible with **ounce-sdk 20261113 / kaiHEN 0.0.4**, in full-memory title/application mode. This is not a Switch 1 or Linux executable. The SDK and homebrew runtime are separate prerequisites, not bundled with this source tree.
+
+Original Starbound credit belongs to Chucklefish and its authors; original xStarbound credit belongs to its contributors. The Switch 2 launcher author line identifies the port maintainer. Existing upstream credits and third-party source notices are retained. The original upstream README follows for reference; its desktop download links and features do not imply Switch 2 support for every feature.
+
+---
+
 # xStarbound
 
 This is a fork of Starbound's source code; all credit for the original code goes to the respective authors. Contributions are welcomed. You **must** own a copy of Starbound to use xStarbound. Base game assets are not provided for obvious reasons.

@@ -73,6 +73,7 @@ public:
   StringList states(String const& stateTypeName) const;
 
   StringList parts() const;
+  bool hasParts() const {return !m_parts.empty();}
 
   // Sets the active state for this state type.  If the state is different than
   // the previously set state, will start the new states animation off at the

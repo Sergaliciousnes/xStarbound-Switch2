@@ -492,7 +492,7 @@ void Monster::update(float dt, uint64_t) {
 
     m_scriptedAnimator.update();
 
-    SpatialLogger::logPoly("world", m_movementController->collisionBody(), {255, 0, 0, 255});
+    STAR_SPATIAL_LOG(logPoly, "world", m_movementController->collisionBody(), {255, 0, 0, 255});
   }
 }
 

@@ -1,5 +1,16 @@
 #include "memGuard.hpp"
 
+#ifdef __SWITCH2__
+#include "Exception.hpp"
+NAMESPACE_SOUP {
+    // Desktop VM/foreign-code facilities are unavailable in this PoC. alloc's
+    // documented failure result prevents callers from writing invalid memory.
+    void* memGuard::alloc(size_t, int) noexcept { return nullptr; }
+    void memGuard::free(void*, size_t) noexcept {}
+    void memGuard::setAllowedAccess(void*, size_t, int, int*) noexcept { std::terminate(); }
+    int memGuard::getAllowedAccess(void*) { SOUP_THROW(Exception("Memory protection queries are unavailable on Horizon")); }
+}
+#else
 #if SOUP_WINDOWS
 	#include <windows.h>
 #else
@@ -110,3 +121,4 @@ NAMESPACE_SOUP
 		return 0;
 	}
 }
+#endif

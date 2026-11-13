@@ -1,0 +1,16 @@
+{
+  "repository": "https://github.com/mjansson/rpmalloc",
+  "tag": "1.4.5",
+  "commit": "e4393ff85585d91400bcbad2e7266c011075b673",
+  "purpose": "isolated Switch 2 small-span backing-provider candidate; desktop allocator unchanged",
+  "files": {
+    "rpmalloc.c": {
+      "url": "https://raw.githubusercontent.com/mjansson/rpmalloc/e4393ff85585d91400bcbad2e7266c011075b673/rpmalloc/rpmalloc.c",
+      "sha256": "f9005d0e75ab052063ed8f574661557df56c161dba75277e700f1aee445a222a"
+    },
+    "rpmalloc.h": {
+      "url": "https://raw.githubusercontent.com/mjansson/rpmalloc/e4393ff85585d91400bcbad2e7266c011075b673/rpmalloc/rpmalloc.h",
+      "sha256": "a45bfebb3122146c23b564f510d8605d32e201789e4668ea1a054da1b36f8ab1"
+    }
+  }
+}

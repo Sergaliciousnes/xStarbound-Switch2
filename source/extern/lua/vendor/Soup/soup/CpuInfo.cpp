@@ -12,7 +12,7 @@
 #elif SOUP_ARM
 	#if SOUP_WINDOWS
 		#include <windows.h>
-	#elif !SOUP_MACOS
+	#elif !SOUP_MACOS && !defined(__SWITCH2__)
 		#include <sys/auxv.h>
 	#endif
 #endif
@@ -90,7 +90,7 @@ NAMESPACE_SOUP
 		armv8_sha1 = false;
 		armv8_sha2 = false;
 		armv8_crc32 = false;
-	#elif SOUP_MACOS
+	#elif SOUP_MACOS || defined(__SWITCH2__)
 		// Assume we are running on an M series chip, because we don't have getauxval.
 		armv8_aes = true;
 		armv8_sha1 = true;

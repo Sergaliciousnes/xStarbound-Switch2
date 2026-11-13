@@ -1,3 +1,4 @@
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarRoot.hpp"
 #include "StarAiDatabase.hpp"
 #include "StarAssets.hpp"
@@ -97,8 +98,19 @@ Root::Root(Settings settings) {
 
   if (m_settings.logFile) {
     String logFile = toStoragePath(*m_settings.logFile);
+#ifdef STAR_SYSTEM_SWITCH2
+    try {
+#endif
     File::backupFileInSequence(logFile, m_settings.logFileBackups);
     Logger::addSink(make_shared<FileLogSink>(logFile, m_settings.logLevel, true));
+#ifdef STAR_SYSTEM_SWITCH2
+    } catch (IOException const& error) {
+      // File logging is optional. Keep the SD-root stdout/stderr diagnostics
+      // available even if an old session still holds the storage log open.
+      Logger::warn("Root: Could not initialize storage log '{}'; continuing with sdmc:/xstarbound-startup.log. {}",
+          logFile, outputException(error, false));
+    }
+#endif
   }
   Logger::stdoutSink()->setLevel(m_settings.logLevel);
 
@@ -130,6 +142,7 @@ Root::Root(Settings settings) {
   m_maintenanceThread = Thread::invoke("Root::maintenanceMain", [this]() {
     MutexLocker locker(m_maintenanceStopMutex);
     while (!m_stopMaintenanceThread) {
+      Switch2WaitProfile::Background maintenance("root-maintenance-pass");
       m_reloadListeners.clearExpiredListeners();
 
       {
@@ -178,6 +191,7 @@ Root::Root(Settings settings) {
       GameObjectRegistry::cleanUpRegistry();
       Directives::cleanupDirectivesCache();
 
+      maintenance.stop();
       m_maintenanceStopCondition.wait(m_maintenanceStopMutex, RootMaintenanceSleep);
     }
   });
@@ -673,7 +687,13 @@ StringList Root::scanForAssetSources(StringList const& directories) {
       else if (entry.second)
         source = make_shared<DirectoryAssetSource>(fileName);
       else if (entry.first.endsWith(".pak"))
+        // Discovery needs only metadata, not another complete copy of every
+        // archive index. The real asset catalogue loads it after ordering.
+#ifdef STAR_SYSTEM_SWITCH2
+        source = make_shared<PackedAssetSource>(fileName, true);
+#else
         source = make_shared<PackedAssetSource>(fileName);
+#endif
       else
         Logger::warn("Root: Unrecognised file in asset directory '{}', skipping", entry.first);
 
@@ -904,7 +924,10 @@ shared_ptr<T> Root::loadMember(shared_ptr<T>& ptr, Mutex& mutex, char const* nam
 
 template <typename T>
 shared_ptr<T> Root::loadMemberFunction(shared_ptr<T>& ptr, Mutex& mutex, char const* name, function<shared_ptr<T>()> loadFunction) {
-  MutexLocker locker(mutex);
+  Switch2WaitProfile::Scope lockWait(Switch2WaitProfile::Metric::RootLock);
+  MutexLocker locker(mutex, false);
+  Switch2WaitProfile::acquire(locker, Switch2WaitProfile::Metric::RootContended);
+  lockWait.stop();
   if (!ptr) {
     ZoneScopedN("Root::loadMemberFunction");
 #ifdef TRACY_ENABLE

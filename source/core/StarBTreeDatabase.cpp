@@ -1,4 +1,5 @@
 #include "StarBTreeDatabase.hpp"
+#include "StarSwitch2IoProfile.hpp"
 #include "StarSha256.hpp"
 #include "StarVlqEncoding.hpp"
 #include "StarLogging.hpp"
@@ -99,6 +100,11 @@ bool BTreeDatabase::autoCommit() const {
   return m_autoCommit;
 }
 
+void BTreeDatabase::setReadBlockCacheBudget(size_t bytes) {
+  WriteLocker writeLocker(m_lock);
+  m_readBlockCache.setBudget(bytes);
+}
+
 void BTreeDatabase::setAutoCommit(bool autoCommit) {
   WriteLocker writeLocker(m_lock);
   m_autoCommit = autoCommit;
@@ -126,6 +132,8 @@ bool BTreeDatabase::open() {
   WriteLocker writeLocker(m_lock);
   if (m_open)
     return false;
+
+  m_readBlockCache.clear();
 
   if (!m_device)
     throw DBException("BlockStorage::open called with no IODevice set");
@@ -346,6 +354,7 @@ void BTreeDatabase::rollback() {
 
   m_availableBlocks.clear();
   m_indexCache.clear();
+  m_readBlockCache.clear();
   m_uncommittedWrites.clear();
   m_uncommitted.clear();
 
@@ -363,6 +372,7 @@ void BTreeDatabase::close(bool closeDevice) {
         doCommit();
 
       m_indexCache.clear();
+      m_readBlockCache.clear();
 
       m_open = false;
       if (closeDevice && m_device && m_device->isOpen())
@@ -955,10 +965,20 @@ void BTreeDatabase::rawReadBlock(BlockIndex blockIndex, size_t blockOffset, char
   if (size <= 0)
     return;
 
-  if (auto buffer = m_uncommittedWrites.ptr(blockIndex))
+  if (auto buffer = m_uncommittedWrites.ptr(blockIndex)) {
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::BlockPending);
     buffer->copyTo(block, blockOffset, size);
-  else
+  } else if (!m_readBlockCache.enabled()) {
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::BlockDisabled);
     m_device->readFullAbsolute(HeaderSize + blockIndex * (StreamOffset)m_blockSize + blockOffset, block, size);
+  } else if (!m_readBlockCache.read(blockIndex, blockOffset, block, size)) {
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::BlockMiss);
+    ByteArray data = m_device->readBytesAbsolute(HeaderSize + blockIndex * (StreamOffset)m_blockSize, m_blockSize);
+    data.copyTo(block, blockOffset, size);
+    m_readBlockCache.store(blockIndex, data.ptr(), data.size());
+  } else {
+    Switch2IoProfile::cache(Switch2IoProfile::Cache::BlockHit);
+  }
 }
 
 void BTreeDatabase::rawWriteBlock(BlockIndex blockIndex, size_t blockOffset, char const* block, size_t size) {
@@ -967,6 +987,8 @@ void BTreeDatabase::rawWriteBlock(BlockIndex blockIndex, size_t blockOffset, cha
 
   if (size <= 0)
     return;
+
+  m_readBlockCache.erase(blockIndex);
 
   StreamOffset blockStart = HeaderSize + blockIndex * (StreamOffset)m_blockSize;
   auto buffer = m_uncommittedWrites.find(blockIndex);
@@ -1185,8 +1207,11 @@ void BTreeDatabase::doCommit() {
 }
 
 void BTreeDatabase::commitWrites() {
-  for (auto& write : m_uncommittedWrites)
+  // Also covers any block buffers populated by compaction paths.
+  for (auto& write : m_uncommittedWrites) {
+    m_readBlockCache.erase(write.first);
     m_device->writeFullAbsolute(HeaderSize + write.first * (StreamOffset)m_blockSize, write.second.ptr(), m_blockSize);
+  }
 
   m_device->sync();
   m_uncommittedWrites.clear();
@@ -1243,6 +1268,7 @@ bool BTreeDatabase::tryFlatten() {
   m_device->resize(m_deviceSize = HeaderSize + (StreamOffset)m_blockSize * count);
 
   m_indexCache.clear();
+  m_readBlockCache.clear();
   commitWrites();
   writeRoot();
   m_uncommitted.clear();

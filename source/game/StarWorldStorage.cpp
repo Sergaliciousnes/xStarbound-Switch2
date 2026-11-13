@@ -1,5 +1,6 @@
 #include "StarWorldStorage.hpp"
 #include "StarAssets.hpp"
+#include "StarBuffer.hpp"
 #include "StarCompression.hpp"
 #include "StarDataStreamExtra.hpp"
 #include "StarEntityFactory.hpp"
@@ -177,7 +178,14 @@ WorldStorage::WorldStorage(WorldChunks const& chunks, WorldGeneratorFacadePtr co
   bool disableFlattening = config->get("disableFlattening").optBool().value(false);
   float flatteningThreshold = disableFlattening ? -1.0f : config->get("flatteningThreshold").optFloat().value(0.05f);
   m_db.setFreeSpaceThreshold(flatteningThreshold);
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_RAM_SHIP_STORAGE)
+  // Disposable working database only. Persistent ship saves still use their
+  // existing WorldChunks/file path; planet databases keep their file devices.
+  openDatabase(m_db, make_shared<Buffer>());
+  Logger::info("WorldStorage: disposable ship working database uses RAM");
+#else
   openDatabase(m_db, File::ephemeralFile());
+#endif
 
   for (auto const& p : chunks) {
     if (p.second)
@@ -691,6 +699,10 @@ void WorldStorage::openDatabase(BTreeDatabase& db, IODevicePtr device) {
   db.setIODevice(std::move(device));
   db.setBlockSize(2048);
   db.setAutoCommit(false);
+#ifdef STAR_SYSTEM_SWITCH2
+  db.setIndexCacheSize(4096);
+  db.setReadBlockCacheBudget(32ULL * 1024 * 1024);
+#endif
   db.open();
 
   if (db.contentIdentifier() != "World4" || db.keySize() != 5)

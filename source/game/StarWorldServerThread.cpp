@@ -1,4 +1,5 @@
 #include "StarWorldServerThread.hpp"
+#include "StarSwitch2SimulationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarLogging.hpp"
 #include "StarNpc.hpp"
@@ -197,6 +198,7 @@ void WorldServerThread::passMessages(List<Message>&& messages) {
   bool handleMessagesNow = false;
   {
     ZoneScopedN("Message mutex");
+    STAR_SIM_SCOPE(stage,Switch2SimulationProfile::Kind::Messages,"",false);
     RecursiveMutexLocker locker(m_messageMutex);
     if (!messages.empty()) m_messages.appendAll(std::move(messages));
     handleMessagesNow = messages.empty() && !m_messages.empty();
@@ -219,6 +221,7 @@ void WorldServerThread::passMessages(List<Message>&& messages) {
 
       {
         ZoneScopedN("World message handling");
+    STAR_SIM_SCOPE(messageWork,Switch2SimulationProfile::Kind::Messages,"",false);
         for (auto& message : messages) {
           if (this->serverErrorOccurred()) {
             message.promise.fail("World server error prevented message handling");
@@ -274,17 +277,24 @@ void WorldServerThread::run() {
     double fidelityScore = 0.0;
     WorldServerFidelity automaticFidelity = WorldServerFidelity::Medium;
 
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_EXPLORATION_PROFILE)
+    auto profileWorldName=printWorldId(m_worldId);
+#endif
     while (!m_stop && !m_errorOccurred) {
+      STAR_SIM_TICK(profileTick,profileWorldName.utf8Ptr(),ServerGlobalTimestep);
       ZoneScopedN("WORLD SERVER TICK");
 #ifdef TRACY_ENABLE
       const char* worldName = printWorldId(m_worldId).utf8().c_str();
       ZoneTextF("%s", worldName);
 #endif
       auto fidelity = lockedFidelity.value(automaticFidelity);
-      LogMap::set(strf("server_{}_fidelity", m_worldId), WorldServerFidelityNames.getRight(fidelity));
-      LogMap::set(strf("server_{}_update", m_worldId), strf("{:4.2f}Hz", tickApproacher.rate()));
+      STAR_SIM_FIDELITY(unsigned(fidelity));
+      STAR_LOG_MAP_SET(strf("server_{}_fidelity", m_worldId), WorldServerFidelityNames.getRight(fidelity));
+      STAR_LOG_MAP_SET(strf("server_{}_update", m_worldId), strf("{:4.2f}Hz", tickApproacher.rate()));
 
-      update(fidelity);
+      {STAR_SIM_SCOPE(work,Switch2SimulationProfile::Kind::Work,"",false);
+        update(fidelity);
+      }
       tickApproacher.tick();
 
       if (storageTimer.timeUp()) {
@@ -309,7 +319,9 @@ void WorldServerThread::run() {
 
       int64_t spareMilliseconds = floor(spareTime * 1000);
       if (spareMilliseconds > 0)
-        Thread::sleepPrecise(spareMilliseconds);
+        {STAR_SIM_SCOPE(sleep,Switch2SimulationProfile::Kind::Sleep,"",false);
+          Thread::sleepPrecise(spareMilliseconds);
+        }
     }
   } catch (std::exception const& e) {
     Logger::error("WorldServerThread exception caught: {}", outputException(e, true));
@@ -322,10 +334,13 @@ void WorldServerThread::run() {
 
 void WorldServerThread::update(WorldServerFidelity fidelity) {
   ZoneScoped;
+  STAR_SIM_SCOPE(lockWait,Switch2SimulationProfile::Kind::Lock,"",false);
   RecursiveMutexLocker locker(m_mutex);
+  lockWait.stop();
   auto unerroredClientIds = m_worldServer->clientIds();
   {
     ZoneScopedN("Inbound packet handling");
+    STAR_SIM_SCOPE(stage,Switch2SimulationProfile::Kind::Inbound,"",false);
     for (auto clientId : unerroredClientIds) {
       RecursiveMutexLocker queueLocker(m_queueMutex);
       auto incomingPackets = take(m_incomingPacketQueue[clientId]);
@@ -344,8 +359,11 @@ void WorldServerThread::update(WorldServerFidelity fidelity) {
 
   float dt = ServerGlobalTimestep * GlobalTimescale;
   m_worldServer->setFidelity(fidelity);
-  if (dt > 0.0f && (!m_pause || *m_pause == false))
+  if (dt > 0.0f && (!m_pause || *m_pause == false)) {
+    STAR_SIM_SCOPE(worldUpdate,Switch2SimulationProfile::Kind::WorldUpdate,"",false);
     m_worldServer->update(dt);
+    STAR_SIM_ADVANCE(dt);
+  }
 
   List<Message> messages;
   {
@@ -356,6 +374,7 @@ void WorldServerThread::update(WorldServerFidelity fidelity) {
 
   {
     ZoneScopedN("World message handling");
+    STAR_SIM_SCOPE(messageWork,Switch2SimulationProfile::Kind::Messages,"",false);
     for (auto& message : messages) {
       if (auto resp = m_worldServer->receiveMessage(ServerConnectionId, message.message, message.args))
         message.promise.fulfill(*resp);
@@ -366,6 +385,7 @@ void WorldServerThread::update(WorldServerFidelity fidelity) {
 
   {
     ZoneScopedN("Outbound packet handling");
+    STAR_SIM_SCOPE(stage,Switch2SimulationProfile::Kind::Outbound,"",false);
     for (auto& clientId : unerroredClientIds) {
       auto outgoingPackets = m_worldServer->getOutgoingPackets(clientId);
       RecursiveMutexLocker queueLocker(m_queueMutex);
@@ -377,11 +397,13 @@ void WorldServerThread::update(WorldServerFidelity fidelity) {
 
   if (m_updateAction) {
     ZoneScopedN("Other update action");
+    STAR_SIM_SCOPE(stage,Switch2SimulationProfile::Kind::Action,"",false);
     m_updateAction(this, m_worldServer.get());
   }
 }
 
 void WorldServerThread::sync() {
+  STAR_SIM_SCOPE(sync,Switch2SimulationProfile::Kind::Sync,"",false);
   RecursiveMutexLocker locker(m_mutex);
   Logger::debug("WorldServer: periodic sync to disk of world {}", m_worldId);
   m_worldServer->sync();

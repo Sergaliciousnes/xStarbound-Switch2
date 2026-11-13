@@ -2,7 +2,9 @@
 
 #include "CpuInfo.hpp"
 
-#if SOUP_WINDOWS
+#if defined(__SWITCH2__)
+#include <switch.h>
+#elif SOUP_WINDOWS
 #include <windows.h>
 #include <bcrypt.h>
 #pragma comment(lib, "bcrypt.lib")
@@ -80,7 +82,9 @@ NAMESPACE_SOUP
 
 	void FastHardwareRng::generate(void* buf, size_t buflen) noexcept
 	{
-#if SOUP_WINDOWS
+#if defined(__SWITCH2__)
+        randomGet(buf, buflen);
+#elif SOUP_WINDOWS
 		BCryptGenRandom(nullptr, (PUCHAR)buf, (ULONG)buflen, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
 #elif SOUP_LINUX
 		size_t filled = 0;

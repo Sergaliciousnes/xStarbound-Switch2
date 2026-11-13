@@ -1,4 +1,5 @@
 #include "StarLuaComponents.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
 #include "StarAssets.hpp"
 #include "StarRoot.hpp"
 #include "StarRootLuaBindings.hpp"
@@ -92,8 +93,10 @@ bool LuaBaseComponent::init() {
   if (!m_luaRoot)
     return false;
 
+  STAR_EXPLORATION_SCOPE(componentTrace,Switch2ExplorationProfile::Kind::ScriptComponentInit,m_scripts.empty() ? "" : m_scripts.first().utf8Ptr());
   m_error.reset();
   try {
+    STAR_EXPLORATION_SCOPE(contextTrace,Switch2ExplorationProfile::Kind::ScriptContext,m_scripts.empty() ? "" : m_scripts.first().utf8Ptr());
     m_context = m_luaRoot->createContext(m_scripts);
   } catch (LuaException const& e) {
     Logger::error("Exception while creating lua context for scripts '{}': {}", m_scripts, outputException(e, true));
@@ -105,6 +108,7 @@ bool LuaBaseComponent::init() {
 
   if (m_context->containsPath("init")) {
     try {
+      STAR_EXPLORATION_SCOPE(initTrace,Switch2ExplorationProfile::Kind::ScriptInitFunction,m_scripts.empty() ? "" : m_scripts.first().utf8Ptr());
       m_context->invokePath("init");
     } catch (LuaException const& e) {
       Logger::error("Exception while calling script init: {}", outputException(e, true));

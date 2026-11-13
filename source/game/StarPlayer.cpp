@@ -1363,7 +1363,7 @@ void Player::update(float dt, uint64_t) {
   m_pendingMoves.clear();
 
   if (isClient)
-    SpatialLogger::logPoly("world", m_movementController->collisionBody(), isMaster() ? Color::Orange.toRgba() : Color::Yellow.toRgba());
+    STAR_SPATIAL_LOG(logPoly, "world", m_movementController->collisionBody(), isMaster() ? Color::Orange.toRgba() : Color::Yellow.toRgba());
 }
 
 float Player::timeSinceLastGaveDamage() const {

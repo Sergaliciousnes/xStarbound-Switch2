@@ -1,3 +1,7 @@
+#include "StarSwitch2WaitProfile.hpp"
+#ifdef STAR_SWITCH2_GAMEPLAY_REGRESSION
+#include "../test/gameplay_allocation_regression.hpp"
+#endif
 #include "StarClientApplication.hpp"
 #include "StarAssets.hpp"
 #include "StarConfiguration.hpp"
@@ -15,6 +19,8 @@
 #include "StarRootLoader.hpp"
 #include "StarVersion.hpp"
 #include "StarVoice.hpp"
+#include "StarSwitch2Diagnostics.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarWorldClient.hpp"
 #include "StarWorldTemplate.hpp"
 
@@ -187,6 +193,12 @@ void ClientApplication::shutdown() {
 void ClientApplication::applicationInit(ApplicationControllerPtr appController) {
   Application::applicationInit(appController);
 
+#ifdef STAR_SWITCH2_GAMEPLAY_REGRESSION
+  // Runs before gameplay/capture begins; no world or player files are touched.
+  checkGameplayAllocationRegression();
+  Logger::info("Switch 2 gameplay allocation regression: empty-item isolation, wire-byte compatibility, star ordering and inline texture lifetimes passed");
+#endif
+
   auto assets = m_root->assets();
 
   { /* FezzedOne: Check the smuggling setting *once* at startup after asset preprocessing. */
@@ -289,10 +301,19 @@ void ClientApplication::renderInit(RendererPtr renderer) {
       Logger::warn("No rendering config found for renderer with id '{}'", renderer->rendererId());
   };
 
-  renderer->loadConfig(assets->json("/rendering/opengl20.config"));
-
-  loadEffectConfig("world");
-  loadEffectConfig("interface");
+  if (renderer->rendererId() == "Vulkan") {
+    // Vulkan pipelines use embedded SPIR-V and manage their own world target.
+    // OpenGL GLSL and framebuffer/blit configuration do not apply here.
+    renderer->loadConfig(JsonObject{});
+    if (renderer->supportsWorldRendering())
+      renderer->loadEffectConfig("world", JsonObject{{"builtin", "world"}}, {});
+    renderer->loadEffectConfig("interface", JsonObject{{"builtin", "interface"}}, {});
+    Logger::info("Vulkan mode: {}", renderer->supportsWorldRendering() ? "experimental gameplay" : "menu preview (world entry disabled)");
+  } else {
+    renderer->loadConfig(assets->json("/rendering/opengl20.config"));
+    loadEffectConfig("world");
+    loadEffectConfig("interface");
+  }
 
   if (m_root->configuration()->get("limitTextureAtlasSize").optBool().value(false))
     renderer->setSizeLimitEnabled(true);
@@ -467,6 +488,15 @@ void ClientApplication::update() {
 }
 
 void ClientApplication::render() {
+#ifdef STAR_SYSTEM_SWITCH2
+  auto profileScene = Switch2WaitProfile::Scene::Menu;
+  if (m_state > MainAppState::Title && m_universeClient && m_universeClient->clientContext()) {
+    auto world = m_universeClient->playerWorld();
+    profileScene = world.is<ClientShipWorldId>() ? Switch2WaitProfile::Scene::Ship
+        : world.is<CelestialWorldId>() ? Switch2WaitProfile::Scene::Planet : Switch2WaitProfile::Scene::Other;
+  }
+  Switch2WaitProfile::scene(profileScene);
+#endif
   auto config = m_root->configuration();
   auto assets = m_root->assets();
   auto& renderer = Application::renderer();
@@ -490,28 +520,63 @@ void ClientApplication::render() {
   } else if (m_state > MainAppState::Title) {
     WorldClientPtr worldClient = m_universeClient->worldClient();
     if (worldClient) {
+#ifndef STAR_DISABLE_DEBUG_HUD
       auto totalStart = Time::monotonicMicroseconds();
+#endif
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "render: world effect setup");
       renderer->switchEffectConfig("world");
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "render: gather world drawables");
+#ifndef STAR_DISABLE_DEBUG_HUD
       auto clientStart = totalStart;
-      worldClient->render(m_renderData, TilePainter::BorderTileSize);
-      LogMap::set("client_render_world_client", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - clientStart));
+#endif
+      {
+        Switch2FrameProfile::Zone gatherZone(Switch2FrameProfile::Phase::Gather);
+        Switch2WaitProfile::Scope gatherWaits(Switch2WaitProfile::Metric::Gather);
+        worldClient->render(m_renderData, TilePainter::BorderTileSize);
+      }
+      STAR_LOG_MAP_SET("client_render_world_client", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - clientStart));
 
+#ifndef STAR_DISABLE_DEBUG_HUD
       auto paintStart = Time::monotonicMicroseconds();
+#endif
       auto asyncLightingCallback = [&]() { worldClient->waitForLighting(); };
-      m_worldPainter->render(m_renderData, asyncLightingCallback, worldClient->getLightMultiplier(), worldClient->getShaderParameters());
-      LogMap::set("client_render_world_painter", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - paintStart));
-      LogMap::set("client_render_world_total", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - totalStart));
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "render: paint world");
+      {
+        Switch2FrameProfile::Zone paintZone(Switch2FrameProfile::Phase::Paint);
+        Switch2WaitProfile::Scope paintWaits(Switch2WaitProfile::Metric::Paint);
+        m_worldPainter->render(m_renderData, asyncLightingCallback, worldClient->getLightMultiplier(), worldClient->getShaderParameters());
+      }
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "render: world paint complete");
+      STAR_LOG_MAP_SET("client_render_world_painter", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - paintStart));
+      STAR_LOG_MAP_SET("client_render_world_total", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - totalStart));
     }
     renderer->switchEffectConfig("interface");
+#ifndef STAR_DISABLE_DEBUG_HUD
     auto start = Time::monotonicMicroseconds();
+#endif
     m_mainInterface->renderInWorldElements();
     m_mainInterface->render();
     m_cinematicOverlay->render();
-    LogMap::set("client_render_interface", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
+    STAR_LOG_MAP_SET("client_render_interface", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
   }
 
   if (!m_errorScreen->accepted())
     m_errorScreen->render(m_state == MainAppState::ModsWarning || m_state == MainAppState::Error);
+#ifdef STAR_SYSTEM_SWITCH2
+  // Draw last in physical screen pixels, independent of interface/zoom scale.
+  auto fontSize = m_guiContext->textPainter()->fontSize();
+  m_guiContext->resetInterfaceScissorRect();
+  m_guiContext->setDefaultFont();
+  m_guiContext->setFontProcessingDirectives("");
+  m_guiContext->setFontSize(16, 1.0f);
+  m_guiContext->setFontColor(Color::White.toRgba());
+  m_guiContext->setFontMode(FontMode::Shadow);
+  auto const& frameMeter = Switch2FrameProfile::meter;
+  m_guiContext->renderText(strf("FPS: {:.0f}  {:.1f} ms  peak: {:.1f} ms", frameMeter.fps(),
+      frameMeter.milliseconds(), frameMeter.peakMilliseconds()), TextPositioning{Vec2F(8, 4)});
+  m_guiContext->textPainter()->setFontSize(fontSize);
+  m_guiContext->setFontMode(FontMode::Normal);
+#endif
 }
 
 void ClientApplication::getAudioData(int16_t* sampleData, size_t frameCount) {
@@ -524,6 +589,12 @@ void ClientApplication::getAudioData(int16_t* sampleData, size_t frameCount) {
 }
 
 void ClientApplication::changeState(MainAppState newState) {
+  if (newState > MainAppState::Title && Application::renderer() && !Application::renderer()->supportsWorldRendering()) {
+    if (m_titleScreen) m_titleScreen->resetState();
+    if (m_errorScreen) m_errorScreen->setMessage("Vulkan menu preview: world rendering is not implemented yet. Please use OpenGL to play.");
+    Logger::info("Vulkan menu preview: blocked world entry before creating a server or connection");
+    return;
+  }
   MainAppState oldState = m_state;
   m_state = newState;
 
@@ -750,6 +821,8 @@ void ClientApplication::changeState(MainAppState newState) {
 
     } else {
       if (!m_universeServer) {
+        Switch2Diagnostics::startWorldEntryTrace();
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "create local server");
         try {
           m_universeServer = makeObject<UniverseServer>(m_root->toStoragePath("universe"));
           m_universeServer->start();
@@ -759,6 +832,7 @@ void ClientApplication::changeState(MainAppState newState) {
         }
       }
 
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "connect local client");
       if (auto errorMessage = m_universeClient->connect(m_universeServer->addLocalClient(), "", "")) {
         setError(strf("Error connecting locally: {}", *errorMessage));
         return;
@@ -768,7 +842,9 @@ void ClientApplication::changeState(MainAppState newState) {
     m_titleScreen->stopMusic();
 
     // FezzedOne: Needs `makeObject` for legacy Lua smuggling because it's completely reset on player swaps.
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "create main interface");
     m_mainInterface = makeObject<MainInterface>(m_universeClient, m_worldPainter, m_cinematicOverlay);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "reset main interface");
     m_mainInterface->reset(); // Needs to be invoked separately to ensure the main interface is registered before any pane scripts are run.
     auto legacySmuggling = GameObjectRegistry::smugglingEnabled();
     if (!legacySmuggling)
@@ -1052,8 +1128,11 @@ void ClientApplication::updateRunning(float dt) {
     }
 
     // FezzedOne: Needs to be moved up here to prevent a callback from returning a position of {0, 0} the tick after a world is loaded.
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "update camera");
     updateCamera(dt);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "update universe client");
     m_universeClient->update(dt);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "universe client update complete");
     // FezzedOne: Make sure inputs are always passed to the active player.
     m_player = m_universeClient->mainPlayer();
     m_cinematicOverlay->setPlayer(m_player);
@@ -1062,6 +1141,7 @@ void ClientApplication::updateRunning(float dt) {
       return;
 
     if (auto worldClient = m_universeClient->worldClient()) {
+      Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "world painter update");
       m_worldPainter->update(dt);
       auto& broadcastCallback = worldClient->broadcastCallback();
       if (!broadcastCallback) {
@@ -1101,9 +1181,18 @@ void ClientApplication::updateRunning(float dt) {
     }
 
     m_cinematicOverlay->update(dt);
-    m_mainInterface->update(dt);
-    m_mainMixer->update(dt, m_cinematicOverlay->muteSfx(), m_cinematicOverlay->muteMusic(),
-        m_cinematicOverlay->muteMusic() || m_cinematicOverlay->muteSfx());
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Main, "main interface update");
+    {
+      Switch2FrameProfile::Zone interfaceZone(Switch2FrameProfile::Phase::InterfaceUpdate);
+      Switch2WaitProfile::Scope wait_interfaceZone(Switch2WaitProfile::Metric::InterfaceUpdate);
+      m_mainInterface->update(dt);
+    }
+    {
+      Switch2FrameProfile::Zone mixerZone(Switch2FrameProfile::Phase::MixerUpdate);
+      Switch2WaitProfile::Scope wait_mixerZone(Switch2WaitProfile::Metric::MixerUpdate);
+      m_mainMixer->update(dt, m_cinematicOverlay->muteSfx(), m_cinematicOverlay->muteMusic(),
+          m_cinematicOverlay->muteMusic() || m_cinematicOverlay->muteSfx());
+    }
     m_mainMixer->setSpeed(GlobalTimescale);
 
     bool inputActive = m_mainInterface->textInputActive();
@@ -1131,19 +1220,21 @@ void ClientApplication::updateRunning(float dt) {
       m_universeServer->setPause(m_mainInterface->escapeDialogOpen());
     }
 
+#ifndef STAR_DISABLE_DEBUG_HUD
     Vec2F aimPosition = m_player->aimPosition();
     float fps = appController()->renderFps();
-    LogMap::set("client_render_rate", strf("{:4.2f} FPS ({:4.2f}ms)", fps, (1.0f / appController()->renderFps()) * 1000.0f));
-    LogMap::set("client_update_rate", strf("{:4.2f}Hz", appController()->updateRate()));
-    LogMap::set("player_pos", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", m_player->position()[0], m_player->position()[1]));
-    LogMap::set("player_vel", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", m_player->velocity()[0], m_player->velocity()[1]));
-    LogMap::set("player_aim", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", aimPosition[0], aimPosition[1]));
+    STAR_LOG_MAP_SET("client_render_rate", strf("{:4.2f} FPS ({:4.2f}ms)", fps, (1.0f / appController()->renderFps()) * 1000.0f));
+    STAR_LOG_MAP_SET("client_update_rate", strf("{:4.2f}Hz", appController()->updateRate()));
+    STAR_LOG_MAP_SET("player_pos", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", m_player->position()[0], m_player->position()[1]));
+    STAR_LOG_MAP_SET("player_vel", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", m_player->velocity()[0], m_player->velocity()[1]));
+    STAR_LOG_MAP_SET("player_aim", strf("[ ^#f45;{:4.2f}^reset;, ^#49f;{:4.2f}^reset; ]", aimPosition[0], aimPosition[1]));
     if (auto world = m_universeClient->worldClient()) {
       auto aim = Vec2I::floor(aimPosition);
-      LogMap::set("tile_liquid_level", toString(world->liquidLevel(aim).level));
-      LogMap::set("tile_dungeon_id", world->isTileProtected(aim) ? strf("^red;{}", world->dungeonId(aim)) : toString(world->dungeonId(aim)));
+      STAR_LOG_MAP_SET("tile_liquid_level", toString(world->liquidLevel(aim).level));
+      STAR_LOG_MAP_SET("tile_dungeon_id", world->isTileProtected(aim) ? strf("^red;{}", world->dungeonId(aim)) : toString(world->dungeonId(aim)));
     }
 
+#endif
     if (m_mainInterface->currentState() == MainInterface::ReturnToTitle) {
       // FezzedOne: Clean up cached directives in the image metadata cache upon exiting to the menu.
       Root::singleton().cleanUpImageMetadata();

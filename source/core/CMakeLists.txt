@@ -183,16 +183,36 @@ add_library(star_core STATIC
 
 if(STAR_SYSTEM_FAMILY_UNIX)
     target_sources(star_core
-            PUBLIC
-            StarDynamicLib_unix.cpp
+            PRIVATE
             StarException_unix.cpp
             StarFile_unix.cpp
             StarLockFile_unix.cpp
-            StarSecureRandom_unix.cpp
             StarSignalHandler_unix.cpp
             StarThread_unix.cpp
             StarTime_unix.cpp
     )
+    if(STAR_SYSTEM_SWITCH2)
+        target_sources(star_core PRIVATE StarDynamicLib_switch2.cpp StarSecureRandom_switch2.cpp)
+        if(STAR_SWITCH2_WAIT_PROFILE OR STAR_SWITCH2_IO_PROFILE OR STAR_SWITCH2_ALLOCATION_PROFILE OR STAR_SWITCH2_EXPLORATION_PROFILE OR STAR_SWITCH2_DIAGNOSTICS OR STAR_SWITCH2_ASSET_STARTUP_TRACE)
+            target_sources(star_core PRIVATE StarSwitch2WaitProfile.cpp)
+        else()
+            # A clean client must remove the legacy always-compiled timing
+            # scopes and buffers, not merely leave recording inactive.
+            target_compile_definitions(star_core PUBLIC STAR_SWITCH2_TIMING_DISABLED)
+        endif()
+        if(STAR_SWITCH2_ALLOCATION_PROFILE)
+            target_sources(star_core PRIVATE StarSwitch2AllocationProfile.cpp)
+        endif()
+        if(STAR_SWITCH2_IO_PROFILE)
+            target_sources(star_core PRIVATE StarSwitch2IoProfile.cpp)
+            target_compile_definitions(star_core PUBLIC STAR_SWITCH2_IO_PROFILE)
+        endif()
+        if(STAR_SWITCH2_DIAGNOSTICS)
+            target_sources(star_core PRIVATE StarSwitch2Diagnostics.cpp)
+        endif()
+    else()
+        target_sources(star_core PRIVATE StarDynamicLib_unix.cpp StarSecureRandom_unix.cpp)
+    endif()
 elseif(STAR_SYSTEM_FAMILY_WINDOWS)
     target_sources(star_core
             PUBLIC
@@ -223,3 +243,23 @@ target_link_libraries(star_core
 target_precompile_headers(star_core PUBLIC StarPch.hpp)
 
 add_library(Star::Core ALIAS star_core)
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+    target_sources(star_core PRIVATE StarSwitch2ExplorationProfile.cpp StarSwitch2SimulationProfile.cpp)
+    set_property(SOURCE StarSwitch2ExplorationProfile.cpp StarSwitch2SimulationProfile.cpp StarSwitch2WaitProfile.cpp StarLua.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_ASSET_STARTUP_TRACE)
+    target_sources(star_core PRIVATE StarSwitch2AssetStartupTrace.cpp)
+    set_property(SOURCE StarSwitch2AssetStartupTrace.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_ASSET_STARTUP_TRACE)
+    if(STAR_SWITCH2_GAME_RPMALLOC)
+        set_property(SOURCE StarSwitch2AssetStartupTrace.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_RPMALLOC)
+    endif()
+endif()
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_GAME_RPMALLOC)
+    target_sources(star_core PRIVATE StarSwitch2GameAllocator.cpp StarSwitch2RpmallocGameBackend.cpp)
+    target_link_libraries(star_core PRIVATE "$<LINK_ONLY:rpmalloc_switch2_candidate>")
+    target_link_options(star_core INTERFACE "-Wl,--wrap=free,--wrap=realloc")
+    set_property(SOURCE StarMemory.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_RPMALLOC)
+    if(STAR_SWITCH2_ALLOCATION_PROFILE)
+        set_property(SOURCE StarMemory.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_ALLOC_PROFILE)
+    endif()
+endif()

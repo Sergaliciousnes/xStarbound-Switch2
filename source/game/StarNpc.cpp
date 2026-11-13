@@ -1,4 +1,5 @@
 #include "StarNpc.hpp"
+#include "StarSwitch2SimulationProfile.hpp"
 #include "StarArmors.hpp"
 #include "StarAssets.hpp"
 #include "StarBehaviorLuaBindings.hpp"
@@ -379,10 +380,13 @@ void Npc::update(float dt, uint64_t) {
   if (!inWorld())
     return;
 
+  STAR_SIM_SCOPE(npcUpdate,Switch2SimulationProfile::Kind::NpcUpdate,m_npcVariant.typeName.utf8Ptr());
   m_movementController->setTimestep(dt);
 
   if (isMaster()) {
-    m_scriptComponent.update(m_scriptComponent.updateDt(dt));
+    {STAR_SIM_SCOPE(npcStage,Switch2SimulationProfile::Kind::NpcScript);
+      m_scriptComponent.update(m_scriptComponent.updateDt(dt));
+    }
 
     if (inConflictingLoungeAnchor())
       m_movementController->resetAnchorState();
@@ -419,10 +423,16 @@ void Npc::update(float dt, uint64_t) {
       m_statusController->setPersistentEffects("armor", m_armor->statusEffects());
     m_statusController->setPersistentEffects("tools", m_tools->statusEffects());
 
-    m_movementController->tickMaster(dt);
-    m_statusController->tickMaster(dt);
+    {STAR_SIM_SCOPE(npcStage,Switch2SimulationProfile::Kind::NpcMovement);
+      m_movementController->tickMaster(dt);
+    }
+    {STAR_SIM_SCOPE(npcStage,Switch2SimulationProfile::Kind::NpcStatus);
+      m_statusController->tickMaster(dt);
+    }
 
-    tickShared(dt);
+    {STAR_SIM_SCOPE(npcStage,Switch2SimulationProfile::Kind::NpcShared);
+      tickShared(dt);
+    }
 
     if (!is<LoungeAnchor>(m_movementController->entityAnchor())) {
       if (m_movementController->groundMovement()) {
@@ -473,11 +483,13 @@ void Npc::update(float dt, uint64_t) {
     m_movementController->tickSlave(dt);
     m_statusController->tickSlave(dt);
 
-    tickShared(dt);
+    {STAR_SIM_SCOPE(npcStage,Switch2SimulationProfile::Kind::NpcShared);
+      tickShared(dt);
+    }
   }
 
   if (world()->isClient())
-    SpatialLogger::logPoly("world", m_movementController->collisionBody(), {0, 255, 0, 255});
+    STAR_SPATIAL_LOG(logPoly, "world", m_movementController->collisionBody(), {0, 255, 0, 255});
 }
 
 void Npc::render(RenderCallback* renderCallback) {

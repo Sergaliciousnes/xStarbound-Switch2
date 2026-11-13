@@ -43,6 +43,9 @@ public:
   virtual void setCursorVisible(bool cursorVisible) = 0;
   virtual bool setCursorImage(const String& id, const ImageConstPtr& image, unsigned scale, const Vec2I& offset) = 0;
   virtual void setAcceptingTextInput(bool acceptingTextInput) = 0;
+  // Optional platform editor. Explicit widget activation, separate from focus
+  // and desktop text-event capture. None means cancellation/unsupported.
+  virtual Maybe<String> editText(String const&, bool = false) { return {}; }
 
 
 

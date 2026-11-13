@@ -43,3 +43,9 @@ target_link_libraries(star_base
 target_precompile_headers(star_base REUSE_FROM star_core)
 
 add_library(Star::Base ALIAS star_base)
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+    set_property(SOURCE StarAssets.cpp StarPackedAssetSource.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_ASSET_STARTUP_TRACE)
+    set_property(SOURCE StarAssets.cpp StarPackedAssetSource.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_ASSET_STARTUP_TRACE)
+endif()

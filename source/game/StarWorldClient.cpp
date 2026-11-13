@@ -1,4 +1,8 @@
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarWorldClient.hpp"
+#include "StarSwitch2ExplorationProfile.hpp"
+#include "StarSwitch2Diagnostics.hpp"
+#include "StarSwitch2FrameProfile.hpp"
 #include "StarAggressiveEntity.hpp"
 #include "StarBiome.hpp"
 #include "StarCurve25519.hpp"
@@ -17,6 +21,7 @@
 #include "StarParticleManager.hpp"
 #include "StarPhysicsEntity.hpp"
 #include "StarPlayer.hpp"
+#include "StarPlant.hpp"
 #include "StarPlayerLog.hpp"
 #include "StarStoredFunctions.hpp"
 #include "StarWorldImpl.hpp"
@@ -30,6 +35,22 @@
 #endif
 
 namespace Star {
+
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_DIAGNOSTICS)
+namespace {
+Switch2FrameProfile::Phase entityProfilePhase(EntityType type, bool rendering) {
+  using Phase = Switch2FrameProfile::Phase;
+  switch (type) {
+    case EntityType::Player: return rendering ? Phase::RenderPlayer : Phase::UpdatePlayer;
+    case EntityType::Monster:
+    case EntityType::Npc: return rendering ? Phase::RenderMonster : Phase::UpdateMonster;
+    case EntityType::Object: return rendering ? Phase::RenderObject : Phase::UpdateObject;
+    case EntityType::Plant: return rendering ? Phase::RenderPlant : Phase::UpdatePlant;
+    default: return rendering ? Phase::RenderOther : Phase::UpdateOther;
+  }
+}
+}
+#endif
 
 const std::string SECRET_BROADCAST_PUBLIC_KEY = "SecretBroadcastPublicKey";
 const std::string SECRET_BROADCAST_PREFIX = "\0Broadcast\0"s;
@@ -506,6 +527,7 @@ RectI WorldClient::clientWindow() const {
 }
 
 void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: clear render data");
   ZoneScoped;
 
   renderData.clear();
@@ -534,17 +556,29 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
   renderData.geometry = m_geometry;
 
   ClientRenderCallback lightingRenderCallback;
+  Switch2FrameProfile::Zone lightSourceZone(Switch2FrameProfile::Phase::GatherLights);
+  STAR_EXPLORATION_SCOPE(explore_lightSourceZone,Switch2ExplorationProfile::Kind::GatherLights);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: entity light sources");
   {
     ZoneScopedN("Rendering entity light sources");
     m_entityMap->forAllEntities([&](EntityPtr const& entity) {
       if (m_startupHiddenEntities.contains(entity->entityId()))
         return;
 
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::GatherLightCalls);
+      STAR_EXPLORATION_SCOPE(entityLight,entity->entityType()==EntityType::Npc ? Switch2ExplorationProfile::Kind::GatherNpcLights :
+          entity->entityType()==EntityType::Object ? Switch2ExplorationProfile::Kind::GatherObjectLights : Switch2ExplorationProfile::Kind::GatherOtherLights,
+          Switch2WaitProfile::detailed() ? EntityTypeNames.getRight(entity->entityType()).utf8Ptr() : "",entity->entityId(),true);
       entity->renderLightSources(&lightingRenderCallback);
     });
   }
 
   renderLightSources = std::move(lightingRenderCallback.lightSources);
+  STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::GatherLightSources,renderLightSources.size());
+  lightSourceZone.stop();
+  explore_lightSourceZone.stop();
+  Switch2FrameProfile::Zone lightingSetupZone(Switch2FrameProfile::Phase::GatherLighting);
+  STAR_EXPLORATION_SCOPE(explore_lightingSetupZone,Switch2ExplorationProfile::Kind::GatherLighting);
 
 #define MAX_WINDOW_SIZE_X 1440
 #define MAX_WINDOW_SIZE_Y 810
@@ -564,6 +598,7 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
   renderData.lightMinPosition = lightRange.min();
 
   Vec2U lightSize(lightRange.size());
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: old lightmap lock/copy");
   if (lightingWindowTooLarge)
     lightSize = Vec2U(MAX_WINDOW_SIZE_X, MAX_WINDOW_SIZE_Y);
 
@@ -583,6 +618,7 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
     }
   }
 
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: prepare lighting");
   renderData.tileLightMap.reset(lightSize, PixelFormat::RGBA32);
   renderData.tileLightMap.fill(Vec4B::filled(0));
 
@@ -623,6 +659,11 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
     }
   }
 
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: highlight assets");
+  lightingSetupZone.stop();
+  explore_lightingSetupZone.stop();
+  Switch2FrameProfile::Zone highlightZone(Switch2FrameProfile::Phase::GatherHighlights);
+  STAR_EXPLORATION_SCOPE(explore_highlightZone,Switch2ExplorationProfile::Kind::GatherHighlights);
   float pulseAmount = Root::singleton().assets()->json("/highlights.config:interactivePulseAmount").toFloat();
   float pulseRate = Root::singleton().assets()->json("/highlights.config:interactivePulseRate").toFloat();
   float pulseLevel = 1 - pulseAmount * 0.5 * (sin(2 * Constants::pi * pulseRate * Time::monotonicMilliseconds() / 1000.0) + 1);
@@ -642,6 +683,17 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
       if (auto& globalDirectives = m_worldTemplate->worldParameters()->globalDirectives)
         directives = &globalDirectives.get();
   }
+  highlightZone.stop();
+  explore_highlightZone.stop();
+#ifdef STAR_SYSTEM_SWITCH2
+  // Image-changing directives and highlights may extend visual bounds.
+  bool cullPlantVisuals = !directives && m_entitySpecificDirectives.empty()
+      && !m_allEntityDirectives.primaryDirectives && !m_allEntityDirectives.underlayDirectives
+      && !m_allEntityDirectives.overlayDirectives && !inspecting && !m_interactiveHighlightMode;
+  RectF plantRenderWindow = RectF(window).padded(2.0f);
+#endif
+  Switch2FrameProfile::Zone entityGatherZone(Switch2FrameProfile::Phase::GatherEntities);
+  STAR_EXPLORATION_SCOPE(explore_entityGatherZone,Switch2ExplorationProfile::Kind::GatherEntities);
   m_entityMap->forAllEntities([&](EntityPtr const& entity) {
     ZoneScopedN("Entity rendering");
 #ifdef TRACY_ENABLE
@@ -655,13 +707,42 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
     if (m_startupHiddenEntities.contains(entity->entityId()))
       return;
 
+    STAR_EXPLORATION_COUNT(entity->entityType()==EntityType::Npc ? Switch2ExplorationProfile::Counter::GatherNpcs :
+        entity->entityType()==EntityType::Object ? Switch2ExplorationProfile::Counter::GatherObjects : Switch2ExplorationProfile::Counter::GatherOther);
     ClientRenderCallback renderCallback;
 
-    entity->render(&renderCallback);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: entity render callback");
+    Switch2FrameProfile::count(Switch2FrameProfile::Counter::EntitiesGathered, 1);
+    {
+      STAR_EXPLORATION_SCOPE(entityDraw,entity->entityType()==EntityType::Npc ? Switch2ExplorationProfile::Kind::GatherNpcRender :
+          entity->entityType()==EntityType::Object ? Switch2ExplorationProfile::Kind::GatherObjectRender : Switch2ExplorationProfile::Kind::GatherOtherRender,
+          Switch2WaitProfile::detailed() ? EntityTypeNames.getRight(entity->entityType()).utf8Ptr() : "",entity->entityId(),true);
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_DIAGNOSTICS)
+      Switch2FrameProfile::Zone entityZone(entityProfilePhase(entity->entityType(), true));
+#endif
+#ifdef STAR_SYSTEM_SWITCH2
+      if (cullPlantVisuals && entity->entityType() == EntityType::Plant && entity->entityId() != playerAimInteractive) {
+        auto plant = as<Plant>(entity);
+        auto bounds = plant->visualBoundBox();
+        bool visible = bounds.isNull() || bounds.width() >= m_geometry.size()[0] / 2.0f
+            || m_geometry.rectIntersectsRect(plantRenderWindow, bounds.translated(plant->position()));
+        Switch2FrameProfile::count(visible ? Switch2FrameProfile::Counter::PlantsDrawn : Switch2FrameProfile::Counter::PlantsCulled, 1);
+        plant->render(&renderCallback, visible);
+      } else
+#endif
+      entity->render(&renderCallback);
+    }
+    Switch2FrameProfile::count(Switch2FrameProfile::Counter::DrawableSets, renderCallback.drawables.size());
+    Switch2FrameProfile::Zone directiveZone(Switch2FrameProfile::Phase::GatherDirectives);
+    STAR_EXPLORATION_SCOPE(entityDirectives,entity->entityType()==EntityType::Npc ? Switch2ExplorationProfile::Kind::GatherNpcDirectives :
+        entity->entityType()==EntityType::Object ? Switch2ExplorationProfile::Kind::GatherObjectDirectives : Switch2ExplorationProfile::Kind::GatherOtherDirectives,
+        Switch2WaitProfile::detailed() ? EntityTypeNames.getRight(entity->entityType()).utf8Ptr() : "",entity->entityId(),true);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: entity drawable directives");
 
     EntityDrawables ed;
     auto entitySpecificDirectives = m_entitySpecificDirectives.ptr(entity->entityId());
     for (auto& p : renderCallback.drawables) {
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::GatherDrawables,p.second.size());
       Directives* primaryDirectives = nullptr;
       if (entitySpecificDirectives && entitySpecificDirectives->primaryDirectives)
         primaryDirectives = &(*(entitySpecificDirectives->primaryDirectives));
@@ -733,6 +814,11 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
         return a->entityId() < b->entityId();
       });
 
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: copy tile array");
+  entityGatherZone.stop();
+  explore_entityGatherZone.stop();
+  Switch2FrameProfile::Zone tileCopyZone(Switch2FrameProfile::Phase::GatherTiles);
+  STAR_EXPLORATION_SCOPE(explore_tileCopyZone,Switch2ExplorationProfile::Kind::GatherTiles);
   m_tileArray->tileEachTo(renderData.tiles, tileRange, [&](RenderTile& renderTile, Vec2I const& position, ClientTile const& clientTile) {
     renderTile.foreground = clientTile.foreground;
     renderTile.foregroundMod = clientTile.foregroundMod;
@@ -805,9 +891,15 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
     }
   }
 
+  tileCopyZone.stop();
+  explore_tileCopyZone.stop();
+  Switch2FrameProfile::Zone environmentZone(Switch2FrameProfile::Phase::GatherEnvironment);
+  STAR_EXPLORATION_SCOPE(explore_environmentZone,Switch2ExplorationProfile::Kind::GatherEnvironment);
   renderData.particles = &m_particles->particles();
-  LogMap::set("client_render_particle_count", renderData.particles->size());
+  Switch2FrameProfile::count(Switch2FrameProfile::Counter::ParticleCount, renderData.particles->size());
+  STAR_LOG_MAP_SET("client_render_particle_count", renderData.particles->size());
 
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: sky render data");
   renderData.skyRenderData = m_sky->renderData();
 
   auto environmentBiome = mainEnvironmentBiome();
@@ -839,6 +931,7 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
     }
   }
 
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: parallax functions");
   auto functionDatabase = Root::singleton().functionDatabase();
   for (auto& layer : renderData.parallaxLayers) {
     if (!layer.timeOfDayCorrelation.empty())
@@ -861,6 +954,7 @@ void WorldClient::render(WorldRenderData& renderData, unsigned bufferTiles) {
   renderData.isFullbright = m_fullBright;
   renderData.dimLevel = m_worldDimLevel;
   renderData.dimColor = m_worldDimColor;
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Render, "gather: complete");
 }
 
 List<AudioInstancePtr> WorldClient::pullPendingInstrumentAudio() {
@@ -954,12 +1048,14 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
   auto entityFactory = root.entityFactory();
 
   for (auto const& packet : packets) {
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "dispatch incoming world packet");
     if (!inWorld() && !is<WorldStartPacket>(packet)) {
       Logger::error("WorldClient received packet type {} while not in world", PacketTypeNames.getRight(packet->type()));
       continue; // FezzedOne: Skip this packet because handling it requires a fully initialised world.
     }
 
     if (auto worldStartPacket = as<WorldStartPacket>(packet)) {
+      STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::WorldStart);
       initWorld(*worldStartPacket);
 
     } else if (auto worldStopPacket = as<WorldStopPacket>(packet)) {
@@ -967,6 +1063,7 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
       clearWorld();
 
     } else if (auto entityCreate = as<EntityCreatePacket>(packet)) {
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::EntityCreates);
       if (m_entityMap->entity(entityCreate->entityId)) {
         Logger::error("WorldClient received entity create packet with duplicate entity id {}, deleting old entity.", entityCreate->entityId);
         removeEntity(entityCreate->entityId, false);
@@ -974,11 +1071,20 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
 
       EntityPtr entity{};
       try {
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "entity create: net load");
+        STAR_EXPLORATION_SCOPE(loadTrace,Switch2ExplorationProfile::Kind::EntityLoad,EntityTypeNames.getRight(entityCreate->entityType).utf8Ptr(),entityCreate->entityId);
         entity = entityFactory->netLoadEntity(entityCreate->entityType, entityCreate->storeData);
+        loadTrace.stop();
+        STAR_EXPLORATION_SCOPE(stateTrace,Switch2ExplorationProfile::Kind::EntityState,EntityTypeNames.getRight(entityCreate->entityType).utf8Ptr(),entityCreate->entityId);
         entity->readNetState(std::move(entityCreate->firstNetState));
         GameObjectRegistry::registerGameObject(entity.get(), entity);
+        stateTrace.stop();
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "entity create: initialize/scripts");
+        STAR_EXPLORATION_SCOPE(initTrace,Switch2ExplorationProfile::Kind::EntityInit,EntityTypeNames.getRight(entityCreate->entityType).utf8Ptr(),entityCreate->entityId);
         entity->init(this, entityCreate->entityId, EntityMode::Slave);
         m_entityMap->addEntity(entity);
+        initTrace.stop();
+        Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "entity create complete");
 
         if (m_interpolationTracker.interpolationEnabled()) {
           entity->enableInterpolation(m_interpolationTracker.extrapolationHint());
@@ -997,6 +1103,7 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
       }
 
     } else if (auto entityUpdateSet = as<EntityUpdateSetPacket>(packet)) {
+      STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::EntityDelta);
       float interpolationLeadTime = m_interpolationTracker.interpolationLeadSteps() * GlobalTimestep;
       m_entityMap->forAllEntities([&](EntityPtr const& entity) {
         EntityId entityId = entity->entityId();
@@ -1004,6 +1111,7 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
         try {
           if (connectionForEntity(entityId) == entityUpdateSet->forConnection) {
             starAssert(entity->isSlave());
+            Switch2FrameProfile::Zone deltaZone(Switch2FrameProfile::Phase::ReadEntityDelta);
             entity->readNetState(std::move(entityUpdateSet->deltas.value(entityId)), interpolationLeadTime);
           }
         } catch (std::exception const& e) {
@@ -1045,6 +1153,10 @@ void WorldClient::handleIncomingPackets(List<PacketPtr> const& packets) {
       m_centralStructure = WorldStructure(structurePacket->structureData);
 
     } else if (auto tileArrayUpdate = as<TileArrayUpdatePacket>(packet)) {
+      auto cells=uint64_t(tileArrayUpdate->array.size()[0])*tileArrayUpdate->array.size()[1];
+      STAR_EXPLORATION_SCOPE(trace,Switch2ExplorationProfile::Kind::TileApply,"",cells);
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TilePackets);
+      STAR_EXPLORATION_COUNT(Switch2ExplorationProfile::Counter::TileCells,cells);
       RectI tileRegion = RectI::withSize(tileArrayUpdate->min, Vec2I(tileArrayUpdate->array.size()));
 
       // NOTE: We're creating client side sectors on tileArrayUpdate here, and
@@ -1326,6 +1438,7 @@ void WorldClient::setLuaCallbacks(String const& groupName, LuaCallbacks const& c
 }
 
 void WorldClient::update(float dt) {
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "world simulation update");
   ZoneScoped;
 
   if (!inWorld())
@@ -1364,10 +1477,12 @@ void WorldClient::update(float dt) {
     auto now = Time::monotonicMilliseconds();
     eraseWhere(m_predictedTiles, [&](auto& pair) {
       float expiry = (float)(now - pair.second.time) / expireTime;
+#ifndef STAR_DISABLE_DEBUG_HUD
       auto center = Vec2F(pair.first) + Vec2F::filled(0.5f);
       auto size = Vec2F::filled(0.875f - expiry * 0.875f);
       auto poly = PolyF(RectF::withCenter(center, size));
-      SpatialLogger::logPoly("world", poly, Color::Cyan.mix(Color::Red, expiry).toRgba());
+      STAR_SPATIAL_LOG(logPoly, "world", poly, Color::Cyan.mix(Color::Red, expiry).toRgba());
+#endif
       if (expiry >= 1.0f) {
         dirtyCollision(RectI::withSize(pair.first, {1, 1}));
         return true;
@@ -1408,14 +1523,27 @@ void WorldClient::update(float dt) {
   List<EntityId> clientPresenceEntities;
   {
     ZoneScopedN("Client entity updates");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldEntities);
+    uint64_t updatedEntities=0;
+    Switch2FrameProfile::Zone updatesZone(Switch2FrameProfile::Phase::EntityUpdates);
     m_entityMap->updateAllEntities([&](EntityPtr const& entity) {
+        ++updatedEntities;
         ZoneScopedN("Client entity update");
 #ifdef TRACY_ENABLE
         const EntityId entityId = entity->entityId();
         const char* const entityTypeStr = EntityTypeNames.getRight(entity->entityType()).utf8().c_str();
         ZoneTextF("%s entity %i", entityTypeStr, entityId);
 #endif
-        entity->update(dt, m_currentStep);
+        Switch2FrameProfile::count(Switch2FrameProfile::Counter::EntitiesUpdated, 1);
+        {
+#if defined(STAR_SYSTEM_SWITCH2) && defined(STAR_SWITCH2_DIAGNOSTICS)
+          Switch2FrameProfile::Zone entityZone(entityProfilePhase(entity->entityType(), false));
+#endif
+          STAR_EXPLORATION_SCOPE(clientEntity,entity->entityType()==EntityType::Npc ? Switch2ExplorationProfile::Kind::ClientNpcUpdate :
+              entity->entityType()==EntityType::Object ? Switch2ExplorationProfile::Kind::ClientObjectUpdate : Switch2ExplorationProfile::Kind::ClientOtherUpdate,
+              "",entity->entityId(),true);
+          entity->update(dt, m_currentStep);
+        }
 
         if (entity->shouldDestroy() && entity->entityMode() == EntityMode::Master)
           toRemove.append(entity->entityId());
@@ -1423,16 +1551,20 @@ void WorldClient::update(float dt) {
           clientPresenceEntities.append(entity->entityId()); }, [](EntityPtr const& a, EntityPtr const& b) { return a->entityType() < b->entityType(); });
 
     m_clientState.setClientPresenceEntities(std::move(clientPresenceEntities));
+    Switch2WaitProfile::count(Switch2WaitProfile::Counter::EntitiesUpdated,updatedEntities);
   }
 
   {
     ZoneScopedN("Damage updates");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldDamage);
+    Switch2FrameProfile::Zone damageZone(Switch2FrameProfile::Phase::Damage);
     m_damageManager->update(dt);
     handleDamageNotifications();
   }
 
   {
     ZoneScopedN("Sky update");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldSky);
     m_sky->setAltitude(m_clientState.windowCenter()[1]);
     m_sky->update(dt);
   }
@@ -1440,6 +1572,8 @@ void WorldClient::update(float dt) {
 
   {
     ZoneScopedN("Weather update");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldWeather);
+    Switch2FrameProfile::Zone weatherZone(Switch2FrameProfile::Phase::Weather);
     m_weather.setVisibleRegion(particleRegion);
     m_weather.update(dt);
   }
@@ -1477,12 +1611,16 @@ void WorldClient::update(float dt) {
 
   {
     ZoneScopedN("Particle update");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldParticles);
+    Switch2FrameProfile::Zone particleZone(Switch2FrameProfile::Phase::ParticleUpdate);
     m_particles->addParticles(m_weather.pullNewParticles());
     m_particles->update(dt, RectF(particleRegion), m_weather.wind());
   }
 
   {
     ZoneScopedN("Audio update");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldAudio);
+    Switch2FrameProfile::Zone audioZone(Switch2FrameProfile::Phase::WorldAudio);
     if (auto audioSample = m_ambientSounds.updateAmbient(currentAmbientNoises(), m_sky->isDayTime()))
       m_samples.append(audioSample);
     if (auto audioSample = m_ambientSounds.updateWeather(currentWeatherNoises()))
@@ -1532,6 +1670,7 @@ void WorldClient::update(float dt) {
 
   {
     ZoneScopedN("Queue for world client update packets");
+    Switch2FrameProfile::Zone networkZone(Switch2FrameProfile::Phase::NetUpdates);
     queueUpdatePackets();
   }
 
@@ -1540,12 +1679,14 @@ void WorldClient::update(float dt) {
     m_pingTime = Time::monotonicMilliseconds();
     m_outgoingPackets.append(make_shared<PingPacket>());
   }
-  LogMap::set("client_ping", m_latency);
+  STAR_LOG_MAP_SET("client_ping", m_latency);
 
   List<ClientTileSectorArray::Sector> loadedSectors;
 
   {
     ZoneScopedN("Sector unloading");
+    Switch2WaitProfile::Scope worldPart(Switch2WaitProfile::Metric::WorldSectors);
+    Switch2FrameProfile::Zone unloadZone(Switch2FrameProfile::Phase::SectorUnload);
     // Remove active sectors that are outside of the current monitoring region
     Set<ClientTileSectorArray::Sector> neededSectors;
     auto monitoredRegions = m_clientState.monitoringRegions([this](EntityId entityId) -> Maybe<RectI> {
@@ -1568,10 +1709,10 @@ void WorldClient::update(float dt) {
     renderCollisionDebug();
   }
 
-  LogMap::set("client_entities", m_entityMap->size());
-  LogMap::set("client_sectors", toString(loadedSectors.size()));
+  STAR_LOG_MAP_SET("client_entities", m_entityMap->size());
+  STAR_LOG_MAP_SET("client_sectors", toString(loadedSectors.size()));
   if (GameObjectRegistry::smugglingEnabled())
-    LogMap::set("client_lua_mem", m_luaRoot->luaMemoryUsage());
+    STAR_LOG_MAP_SET("client_lua_mem", m_luaRoot->luaMemoryUsage());
 }
 
 ConnectionId WorldClient::connection() const {
@@ -1719,7 +1860,10 @@ void WorldClient::collectLiquid(List<Vec2I> const& tilePositions, LiquidId liqui
 }
 
 void WorldClient::waitForLighting() {
+  Switch2WaitProfile::Scope wait(Switch2WaitProfile::Metric::LightingWait);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "wait for lighting mutex");
   MutexLocker lock(m_lightingMutex);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "lighting mutex acquired");
 }
 
 WorldClient::BroadcastCallback& WorldClient::broadcastCallback() {
@@ -1759,6 +1903,8 @@ void WorldClient::queueUpdatePackets() {
     entityUpdateSet->forConnection = *m_clientId;
     m_entityMap->forAllEntities([&](EntityPtr const& entity) {
       if (auto version = m_masterEntitiesNetVersion.ptr(entity->entityId())) {
+        Switch2FrameProfile::Zone deltaZone(Switch2FrameProfile::Phase::WriteEntityDelta);
+        Switch2WaitProfile::Scope stateWrite(Switch2WaitProfile::Metric::EntityDelta);
         auto updateAndVersion = entity->writeNetState(*version);
         if (!updateAndVersion.first.empty())
           entityUpdateSet->deltas[entity->entityId()] = std::move(updateAndVersion.first);
@@ -1972,9 +2118,12 @@ void WorldClient::lightingTileGather() {
 
 void WorldClient::lightingMain() {
   while (true) {
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Lighting, "acquire lighting mutex");
     MutexLocker locker(m_lightingMutex);
 
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Lighting, "lighting condition wait");
     m_lightingCond.wait(m_lightingMutex);
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::Lighting, "lighting calculation");
     if (m_stopLightingThread) {
       // locker.unlock();
       return;
@@ -1983,7 +2132,9 @@ void WorldClient::lightingMain() {
     if (WorldRenderData* renderData = m_renderData) {
       ZoneScopedN("Lighting thread tick");
 
+#ifndef STAR_DISABLE_DEBUG_HUD
       int64_t start = Time::monotonicMicroseconds();
+#endif
 
       lightingTileGather();
 
@@ -1999,7 +2150,7 @@ void WorldClient::lightingMain() {
 #endif
 
       m_renderData = nullptr;
-      LogMap::set("async_light_calc", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
+      STAR_LOG_MAP_SET("async_light_calc", strf(u8"{:05d}\u00b5s", Time::monotonicMicroseconds() - start));
     }
 
     // locker.unlock();
@@ -2007,7 +2158,9 @@ void WorldClient::lightingMain() {
 }
 
 void WorldClient::initWorld(WorldStartPacket const& startPacket) {
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "world start: clear previous world");
   clearWorld();
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "world start: construct template/maps");
   m_outgoingPackets.append(make_shared<WorldStartAcknowledgePacket>());
 
   auto assets = Root::singleton().assets();
@@ -2056,6 +2209,7 @@ void WorldClient::initWorld(WorldStartPacket const& startPacket) {
   setupForceRegions();
 
   if (!m_mainPlayer->isDead()) {
+    Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "world start: initialize main player / scripts");
     m_mainPlayer->init(this, m_entityMap->reserveEntityId(), EntityMode::Master);
     m_entityMap->addEntity(m_mainPlayer);
   }
@@ -2102,6 +2256,8 @@ void WorldClient::initWorld(WorldStartPacket const& startPacket) {
   m_lightIntensityCalculator.setParameters(assets->json("/lighting.config:intensity"));
 
   m_inWorld = true;
+  Switch2Diagnostics::count(Switch2Diagnostics::Counter::WorldStarts);
+  Switch2Diagnostics::stage(Switch2Diagnostics::Channel::ClientWorld, "world start complete");
 }
 
 void WorldClient::clearWorld() {
@@ -2617,13 +2773,16 @@ bool WorldClient::DamageNumberKey::operator<(DamageNumberKey const& other) const
 }
 
 void WorldClient::renderCollisionDebug() {
+#ifdef STAR_DISABLE_DEBUG_HUD
+  return;
+#endif
   RectI clientWindow = m_clientState.window();
   if (clientWindow.isEmpty())
     return;
 
   auto logPoly = [](PolyF poly, Vec2F position, float r, float g, float b) {
     poly.translate(position);
-    SpatialLogger::logPoly("world", poly, {floatToByte(r, true), floatToByte(g, true), floatToByte(b, true), 255});
+    STAR_SPATIAL_LOG(logPoly, "world", poly, {floatToByte(r, true), floatToByte(g, true), floatToByte(b, true), 255});
   };
 
   forEachCollisionBlock(clientWindow, [&](auto const& block) {

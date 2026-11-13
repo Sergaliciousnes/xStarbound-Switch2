@@ -84,6 +84,7 @@ public:
   String state(String const& stateType) const;
 
   StringList parts() const;
+  bool hasParts() const {return m_animatedParts.hasParts();}
 
   // Queries, if it exists, a property value from the underlying
   // AnimatedPartSet for the given state or part.  If the property does not

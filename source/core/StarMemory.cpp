@@ -1,4 +1,10 @@
 #include "StarMemory.hpp"
+#ifdef STAR_SWITCH2_GAME_RPMALLOC
+#include "StarSwitch2GameAllocator.hpp"
+#ifdef STAR_SWITCH2_GAME_ALLOC_PROFILE
+#include "StarSwitch2AllocationProfile.hpp"
+#endif
+#endif
 
 #if defined STAR_USE_MIMALLOC
 #include "mimalloc/mimalloc.h"
@@ -22,7 +28,31 @@
 
 namespace Star {
 
-#if defined STAR_USE_RPMALLOC
+#if defined STAR_SWITCH2_GAME_RPMALLOC
+#ifdef STAR_SWITCH2_GAME_ALLOC_PROFILE
+  void* malloc(size_t size){
+    if(!Switch2AllocationProfile::captureRequested())return Switch2GameAllocator::allocate(size);
+    Switch2AllocationProfile::Call call(Switch2AllocationProfile::Kind::Malloc,size,__builtin_return_address(0));
+    auto p=Switch2GameAllocator::allocate(size);call.result(p);return p;
+  }
+  void* realloc(void* ptr,size_t size){
+    if(!Switch2AllocationProfile::captureRequested())return Switch2GameAllocator::resize(ptr,size);
+    Switch2AllocationProfile::Call call(Switch2AllocationProfile::Kind::Realloc,size,__builtin_return_address(0));
+    auto p=Switch2GameAllocator::resize(ptr,size);call.result(p);return p;
+  }
+  void free(void* ptr){
+    if(!ptr||!Switch2AllocationProfile::captureRequested())return Switch2GameAllocator::release(ptr);
+    Switch2AllocationProfile::Call call(Switch2AllocationProfile::Kind::Free,0,__builtin_return_address(0));
+    Switch2GameAllocator::release(ptr);call.success();
+  }
+  void free(void* ptr,size_t){free(ptr);}
+#else
+  void* malloc(size_t size){return Switch2GameAllocator::allocate(size);}
+  void* realloc(void* ptr,size_t size){return Switch2GameAllocator::resize(ptr,size);}
+  void free(void* ptr){Switch2GameAllocator::release(ptr);}
+  void free(void* ptr,size_t){Switch2GameAllocator::release(ptr);}
+#endif
+#elif defined STAR_USE_RPMALLOC
   void* malloc(size_t size) {
     return ::rpmalloc(size);
   }
@@ -112,7 +142,7 @@ namespace Star {
 
 }
 
-#if !defined STAR_USE_RPMALLOC
+#if !defined(STAR_USE_RPMALLOC) && !defined(STAR_SYSTEM_SWITCH2)
 
 void* operator new(std::size_t size) {
   auto ptr = Star::malloc(size);

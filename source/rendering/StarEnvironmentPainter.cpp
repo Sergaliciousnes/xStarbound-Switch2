@@ -1,12 +1,47 @@
 #include "StarEnvironmentPainter.hpp"
+#include "StarSwitch2WaitProfile.hpp"
 #include "StarJsonExtra.hpp"
 #include "StarLexicalCast.hpp"
 #include "StarLogging.hpp"
 #include "StarMathCommon.hpp"
 #include "StarTime.hpp"
 #include "StarXXHash.hpp"
+#include "StarRenderProfiling.hpp"
+#include <algorithm>
+#include <vector>
 
 namespace Star {
+namespace {
+// Background images are large and change together. Standalone images avoid
+// atlas border construction and whole-page snapshots on a biome transition.
+class ParallaxTextureGroup : public TextureGroup {
+public:
+  explicit ParallaxTextureGroup(RendererPtr renderer) : m_renderer(std::move(renderer)) {}
+  TextureFiltering filtering() const override { return TextureFiltering::Nearest; }
+  TexturePtr create(Image const& image) override {
+    return m_renderer->createTexture(image, TextureAddressing::Clamp, filtering());
+  }
+private:
+  RendererPtr m_renderer;
+};
+
+// Shared final geometry path: resolving the image is independent of placing
+// its quad. Debris can reuse the texture resolved during its bounds pass.
+void appendOrbiterQuad(RendererPtr const& renderer,float pixelRatio,TexturePtr texture,
+    Vec2F position,float scale,float angle,float alpha) {
+  if(!texture)return;
+  Vec2F texSize(texture->size());
+  Mat3F renderMatrix=Mat3F::rotation(angle,position);
+  RectF renderRect=RectF::withCenter(position,texSize*scale*pixelRatio);
+  Vec4B renderColor(255,255,255,255*alpha);
+  renderer->immediatePrimitives().emplace_back(std::in_place_type_t<RenderQuad>(),std::move(texture),
+      renderMatrix.transformVec2(renderRect.min()),Vec2F(0,0),
+      renderMatrix.transformVec2(Vec2F{renderRect.xMax(),renderRect.yMin()}),Vec2F(texSize[0],0),
+      renderMatrix.transformVec2(renderRect.max()),Vec2F(texSize[0],texSize[1]),
+      renderMatrix.transformVec2(Vec2F{renderRect.xMin(),renderRect.yMax()}),Vec2F(0,texSize[1]),
+      renderColor,0.0f);
+}
+}
 
 float const EnvironmentPainter::SunriseTime = 0.072f;
 float const EnvironmentPainter::SunsetTime = 0.42f;
@@ -28,6 +63,14 @@ Vec3B const EnvironmentPainter::RayColor = Vec3B(255, 255, 200);
 EnvironmentPainter::EnvironmentPainter(RendererPtr renderer) {
   m_renderer = std::move(renderer);
   m_textureGroup = make_shared<AssetTextureGroup>(m_renderer->createTextureGroup(TextureGroupSize::Large));
+  if (m_renderer->rendererId() == "Vulkan")
+#ifdef STAR_SYSTEM_SWITCH2
+    m_parallaxTextureGroup = make_shared<AssetTextureGroup>(make_shared<ParallaxTextureGroup>(m_renderer), 256ULL * 1024 * 1024);
+#else
+    m_parallaxTextureGroup = make_shared<AssetTextureGroup>(make_shared<ParallaxTextureGroup>(m_renderer), 64ULL * 1024 * 1024);
+#endif
+  else
+    m_parallaxTextureGroup = m_textureGroup;
   m_timer = 0;
   m_rayPerlin = PerlinF(1, RayPerlinFrequency, RayPerlinAmplitude, 0, 2.0f, 2.0f, Random::randu64());
 }
@@ -39,6 +82,7 @@ void EnvironmentPainter::update(float dt) {
 }
 
 void EnvironmentPainter::renderStars(float pixelRatio, Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyStars);
   if (!sky.settings)
     return;
 
@@ -53,7 +97,8 @@ void EnvironmentPainter::renderStars(float pixelRatio, Vec2F const& screenSize, 
   Vec2F viewMin = sky.starOffset - viewCenter;
 
   auto newStarsHash = starsHash(sky, viewSize);
-  if (newStarsHash != m_starsHash) {
+  if (!m_starGenerator || newStarsHash != m_starsHash) {
+    Switch2WaitProfile::count(Switch2WaitProfile::Counter::StarResets);
     m_starsHash = newStarsHash;
     setupStars(sky);
   }
@@ -69,32 +114,35 @@ void EnvironmentPainter::renderStars(float pixelRatio, Vec2F const& screenSize, 
 
   int starTwinkleMin = sky.settings.queryInt("stars.twinkleMin");
   int starTwinkleMax = sky.settings.queryInt("stars.twinkleMax");
-  size_t starTypesSize = sky.starTypes().size();
+  // starTypes() returns a whole StringList by value; only its size is needed.
+  size_t starTypesSize = (sky.type == SkyType::Warp ? sky.hyperStarList : sky.starList).size();
 
-  auto stars = m_starGenerator->generate(field, [&](RandomSource& rand) {
+  RectF viewRect = RectF::withSize(Vec2F(), viewSize).padded(screenBuffer);
+  uint64_t starsVisited=0,starsDrawn=0;
+  auto& primitives = m_renderer->immediatePrimitives();
+  m_starGenerator->forEach(field, [&](RandomSource& rand) {
     size_t starType = rand.randu32() % starTypesSize;
     float frameOffset = rand.randu32() % sky.starFrames + rand.randf(starTwinkleMin, starTwinkleMax);
     return pair<size_t, float>(starType, frameOffset);
-  });
-
-  RectF viewRect = RectF::withSize(Vec2F(), viewSize).padded(screenBuffer);
-
-  auto& primitives = m_renderer->immediatePrimitives();
-
-  for (auto& star : stars) {
+  }, [&](auto const& star) {
+    ++starsVisited;
     Vec2F screenPos = transform.transformVec2(star.first);
     if (viewRect.contains(screenPos)) {
       size_t starFrame = (size_t)(sky.epochTime + star.second.second) % sky.starFrames;
       auto const& texture = m_starTextures[star.second.first * sky.starFrames + starFrame];
-      if (!texture) continue;
+      if (!texture) return;
+      ++starsDrawn;
       primitives.emplace_back(std::in_place_type_t<RenderQuad>(), texture, screenPos * pixelRatio - Vec2F(texture->size()) / 2, 1.0, color, 0.0f);
     }
-  }
+  });
 
+  Switch2WaitProfile::count(Switch2WaitProfile::Counter::StarsVisited,starsVisited);
+  Switch2WaitProfile::count(Switch2WaitProfile::Counter::StarsDrawn,starsDrawn);
   m_renderer->flush();
 }
 
 void EnvironmentPainter::renderDebrisFields(float pixelRatio, Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyDebris);
   if (!sky.settings)
     return;
 
@@ -117,9 +165,13 @@ void EnvironmentPainter::renderDebrisFields(float pixelRatio, Vec2F const& scree
       Vec2D velocityOffset = -Vec2D(debrisXVel, debrisYVel) * sky.epochTime;
 
       JsonArray imageOptions = debrisField.query("list").toArray();
+      std::vector<pair<StringConstPtr,TexturePtr>> resolvedImages;
+      resolvedImages.reserve(imageOptions.size());
       Vec2U biggest = Vec2U();
       for (Json const& json : imageOptions) {
-        TexturePtr texture = m_textureGroup->loadTexture(*json.stringPtr());
+        auto imageName=json.stringPtr();
+        TexturePtr texture = m_textureGroup->loadTexture(*imageName);
+        resolvedImages.emplace_back(std::move(imageName),texture);
         if (!texture) continue;
         biggest = biggest.piecewiseMax(texture->size());
       }
@@ -127,21 +179,23 @@ void EnvironmentPainter::renderDebrisFields(float pixelRatio, Vec2F const& scree
       float screenBuffer = ceil((float)biggest.max() * (float)Constants::sqrt2);
       PolyD field = PolyD(RectD::withSize(viewMin + velocityOffset, Vec2D(viewSize)).padded(screenBuffer));
       Vec2F debrisAngularVelocityRange = jsonToVec2F(debrisField.query("angularVelocityRange"));
-      auto debrisItems = m_debrisGenerators[i]->generate(field,
+      m_debrisGenerators[i]->forEach(field,
           [&](RandomSource& rand) {
             StringView debrisImage = *rand.randFrom(imageOptions).stringPtr();
             float debrisAngularVelocity = rand.randf(debrisAngularVelocityRange[0], debrisAngularVelocityRange[1]);
 
             return pair<StringView, float>(debrisImage, debrisAngularVelocity);
-          });
-
-      Vec2D debrisPositionOffset = viewMin + velocityOffset;
-
-      for (auto& debrisItem : debrisItems) {
+          }, [&](auto const& debrisItem) {
+        Switch2WaitProfile::count(Switch2WaitProfile::Counter::DebrisVisited);
+        Vec2D debrisPositionOffset = viewMin + velocityOffset;
         Vec2F debrisPosition = rotMatrix.transformVec2(Vec2F(debrisItem.first - debrisPositionOffset));
         float debrisAngle = fmod(Constants::deg2rad * debrisItem.second.second * sky.epochTime, Constants::pi * 2) + sky.starRotation;
-        drawOrbiter(pixelRatio, screenSize, sky, {SkyOrbiterType::SpaceDebris, 1.0f, debrisAngle, debrisItem.second.first, debrisPosition});
-      }
+        auto resolved=std::find_if(resolvedImages.begin(),resolvedImages.end(),[&](auto const& image){return *image.first==debrisItem.second.first;});
+        if(resolved!=resolvedImages.end())
+          appendOrbiterQuad(m_renderer,pixelRatio,resolved->second,debrisPosition*pixelRatio,1.0f,debrisAngle,1.0f);
+        else // Preserve old cached-name behavior if settings changed mid-sky.
+          drawOrbiter(pixelRatio, screenSize, sky, {SkyOrbiterType::SpaceDebris, 1.0f, debrisAngle, debrisItem.second.first, debrisPosition});
+      });
     }
 
     m_renderer->flush();
@@ -149,6 +203,7 @@ void EnvironmentPainter::renderDebrisFields(float pixelRatio, Vec2F const& scree
 }
 
 void EnvironmentPainter::renderBackOrbiters(float pixelRatio, Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyBackOrbiters);
   for (auto const& orbiter : sky.backOrbiters(screenSize / pixelRatio))
     drawOrbiter(pixelRatio, screenSize, sky, orbiter);
 
@@ -156,6 +211,7 @@ void EnvironmentPainter::renderBackOrbiters(float pixelRatio, Vec2F const& scree
 }
 
 void EnvironmentPainter::renderPlanetHorizon(float pixelRatio, Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyHorizon);
   auto planetHorizon = sky.worldHorizon(screenSize / pixelRatio);
   if (planetHorizon.empty())
     return;
@@ -210,6 +266,7 @@ void EnvironmentPainter::renderPlanetHorizon(float pixelRatio, Vec2F const& scre
 }
 
 void EnvironmentPainter::renderFrontOrbiters(float pixelRatio, Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyFrontOrbiters);
   for (auto const& orbiter : sky.frontOrbiters(screenSize / pixelRatio))
     drawOrbiter(pixelRatio, screenSize, sky, orbiter);
 
@@ -217,6 +274,7 @@ void EnvironmentPainter::renderFrontOrbiters(float pixelRatio, Vec2F const& scre
 }
 
 void EnvironmentPainter::renderSky(Vec2F const& screenSize, SkyRenderData const& sky) {
+  Switch2WaitProfile::Scope skyPart(Switch2WaitProfile::Metric::SkyGradient);
   auto& primitives = m_renderer->immediatePrimitives();
   primitives.emplace_back(std::in_place_type_t<RenderQuad>(), TexturePtr(),
       RenderVertex{Vec2F(0, 0), Vec2F(), sky.bottomRectColor.toRgba(), 0.0f},
@@ -234,6 +292,7 @@ void EnvironmentPainter::renderSky(Vec2F const& screenSize, SkyRenderData const&
 // TODO: Fix this to work with decimal zoom levels. Currently, the clouds shake rapidly when interpolating between zoom levels.
 void EnvironmentPainter::renderParallaxLayers(
     Vec2F parallaxWorldPosition, WorldCamera const& camera, ParallaxLayers const& layers, SkyRenderData const& sky) {
+  STAR_RENDER_ZONE("Parallax layers");
 
   // Note: the "parallax space" referenced below is a grid where the scale of each cell is the size of the parallax image
 
@@ -253,9 +312,11 @@ void EnvironmentPainter::renderParallaxLayers(
     Vec2B parallaxRepeat = layer.repeat;
     Vec2F parallaxOrigin = {0.0f, layer.verticalOrigin};
 
+    STAR_RENDER_ZONE("Parallax layer");
     AssetPath first = layer.textures.first();
+    STAR_RENDER_TEXT("%s", first.basePath.utf8().c_str());
     first.directives <<= layer.directives;
-    auto texture = m_textureGroup->loadTexture(first);
+    auto texture = m_parallaxTextureGroup->loadTexture(first);
     if (!texture) continue;
     Vec2F parallaxSize = Vec2F(texture->size());
     Vec2F parallaxPixels = parallaxSize * camera.pixelRatio();
@@ -326,7 +387,7 @@ void EnvironmentPainter::renderParallaxLayers(
         for (auto const& textureImage : layer.textures) {
           AssetPath withDirectives = textureImage;
           withDirectives.directives <<= layer.directives;
-          if (auto texture = m_textureGroup->tryTexture(withDirectives)) {
+          if (auto texture = m_parallaxTextureGroup->tryTexture(withDirectives)) {
             RectF drawRect = RectF::withSize(anchorPoint, subImage.size() * camera.pixelRatio());
             primitives.emplace_back(std::in_place_type_t<RenderQuad>(), std::move(texture),
                 RenderVertex{drawRect.min(), subImage.min(), drawColor, lightMapMultiplier},
@@ -344,6 +405,8 @@ void EnvironmentPainter::renderParallaxLayers(
 
 void EnvironmentPainter::cleanup(int64_t textureTimeout) {
   m_textureGroup->cleanup(textureTimeout);
+  if (m_parallaxTextureGroup != m_textureGroup)
+    m_parallaxTextureGroup->cleanup(textureTimeout);
 }
 
 void EnvironmentPainter::drawRays(
@@ -423,19 +486,7 @@ void EnvironmentPainter::drawOrbiter(float pixelRatio, Vec2F const& screenSize, 
   }
 
   TexturePtr texture = m_textureGroup->loadTexture(orbiter.image);
-  if (!texture) return;
-  Vec2F texSize = Vec2F(texture->size());
-
-  Mat3F renderMatrix = Mat3F::rotation(orbiter.angle, position);
-  RectF renderRect = RectF::withCenter(position, texSize * orbiter.scale * pixelRatio);
-  Vec4B renderColor = Vec4B(255, 255, 255, 255 * alpha);
-
-  m_renderer->immediatePrimitives().emplace_back(std::in_place_type_t<RenderQuad>(), std::move(texture),
-      renderMatrix.transformVec2(renderRect.min()), Vec2F(0, 0),
-      renderMatrix.transformVec2(Vec2F{renderRect.xMax(), renderRect.yMin()}), Vec2F(texSize[0], 0),
-      renderMatrix.transformVec2(renderRect.max()), Vec2F(texSize[0], texSize[1]),
-      renderMatrix.transformVec2(Vec2F{renderRect.xMin(), renderRect.yMax()}), Vec2F(0, texSize[1]),
-      renderColor, 0.0f);
+  appendOrbiterQuad(m_renderer,pixelRatio,std::move(texture),position,orbiter.scale,orbiter.angle,alpha);
 }
 
 uint64_t EnvironmentPainter::starsHash(SkyRenderData const& sky, Vec2F const& viewSize) const {

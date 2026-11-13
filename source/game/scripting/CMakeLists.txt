@@ -60,3 +60,7 @@ target_precompile_headers(star_game_scripting REUSE_FROM star_core)
 
 add_library(Star::GameScripting ALIAS star_game_scripting)
 
+
+if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_EXPLORATION_PROFILE)
+  set_property(SOURCE StarLuaRoot.cpp StarLuaComponents.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_EXPLORATION_PROFILE)
+endif()
