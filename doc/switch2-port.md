@@ -1,4 +1,4 @@
-> Historical development notes: the early proof-of-concept status below is superseded. The port now runs gameplay and mods on hardware. See [current installation/controls](switch2-tester-readme.md) and [source build instructions](switch2-build.md). Captured logs referenced here are local investigation artifacts and are not distributed with the source.
+> Historical development notes: the early proof-of-concept status below is superseded. The port now runs gameplay and mods on hardware. See [current installation/controls](switch2-readme.md) and [source build instructions](switch2-build.md). Captured logs referenced here are local investigation artifacts and are not distributed with the source.
 
 # Switch 2 proof of concept
 

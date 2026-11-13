@@ -1,4 +1,4 @@
-# xStarbound for Nintendo Switch 2 — Tester Build 1
+# xStarbound for Nintendo Switch 2 — Initial Release
 
 ## REQUIRED FIRST: copy packed.pak from your own Steam installation
 
@@ -7,7 +7,7 @@
 1. Install [Starbound through Steam](https://store.steampowered.com/app/211820/Starbound/) on your computer.
 2. In your Steam Library, right-click **Starbound → Manage → Browse local files**.
 3. Open the game's **assets** folder and locate **packed.pak**.
-4. Extract this tester package and copy its **switch** folder to the root of the SD card used by your Switch 2 homebrew setup.
+4. Extract this release package and copy its **switch** folder to the root of the SD card used by your Switch 2 homebrew setup.
 5. Copy your retail **packed.pak** into **switch/xstarbound/assets/** on that card.
 
 The final destination must be:
@@ -62,7 +62,7 @@ For chat, press **Minus**, enter a message or command, and choose **Done** to se
 
 ## Prerequisites and launch
 
-- **Nintendo Switch 2** with a working Switch 2 homebrew environment and homebrew menu. This is a native Horizon homebrew NRO; it is not a Switch 1 or Linux executable.
+- **Nintendo Switch 2** with [KaiHEN](https://github.com/ouncebrew/kaihen/) installed and a working homebrew menu. This is a native Horizon homebrew NRO; it is not a Switch 1 or Linux executable.
 - A runtime compatible with **ounce-sdk 20261113**. The build was prepared against libounce `db3f88a3`, OunceVK `791c34e` and OunceHEN `9451c44`. Use the matching console-side loader/services or a compatible release.
 - Launch through your homebrew setup's **full-memory application/title mode**. Restricted applet mode is not suitable for this game.
 - Enough free SD-card space for your retail assets, optional mods and growing saves.
@@ -73,18 +73,18 @@ The folder name and location must remain **switch/xstarbound**. The game uses th
 
 ## About this build and source
 
-This is an **unofficial tester port** based on **xStarbound 4.7.0.2**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
+This is an **unofficial Switch 2 port** based on **xStarbound 4.7.0.2**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
 
 - **Switch 2 port and packaging:** Sergalicious.
 - **Original/upstream xStarbound source:** https://github.com/xStarbound/xStarbound
 - **Original Starbound game:** https://store.steampowered.com/app/211820/Starbound/
-- Credit for Starbound goes to **Chucklefish** and its original authors; credit for xStarbound goes to its contributors. Tester packages include `CREDITS.txt` for additional project and font acknowledgments; the upstream README and dependency source notices also retain their credits.
+- Credit for Starbound goes to **Chucklefish** and its original authors; credit for xStarbound goes to its contributors. Release packages include `CREDITS.txt` for additional project and font acknowledgments; the upstream README and dependency source notices also retain their credits.
 
-Switch 2 port source: https://github.com/Sergaliciousnes/xStarbound-Switch2/tree/switch2 . The upstream link identifies the original foundation. Tester packages include build identifiers and SHA-256 checksums.
+Switch 2 port source: https://github.com/Sergaliciousnes/xStarbound-Switch2/tree/switch2 . [Build instructions](https://github.com/Sergaliciousnes/xStarbound-Switch2/blob/switch2/doc/switch2-build.md) explain installing KaiHEN's SDK into devkitPro before compiling. The upstream link identifies the original foundation. Release packages include build identifiers and SHA-256 checksums.
 
 The game renders at **1920×1080** using Vulkan/OunceVK. It retains the tested performance improvements, including rpmalloc, asset/texture caches, bootstrap bytecode caching and RAM-backed temporary shipworld working storage. Persistent saves still go to the SD card.
 
-Extended profiling, allocation tracing, exploration/server captures, startup asset tracing, diagnostic watchdogs and startup regression tests are **disabled**. The small **FPS / frame-time display remains enabled** for tester feedback. Normal startup, error and game logs are retained.
+Extended profiling, allocation tracing, exploration/server captures, startup asset tracing, diagnostic watchdogs and startup regression tests are **disabled**. The small **FPS / frame-time display remains enabled** for performance feedback. Normal startup, error and game logs are retained.
 
 Single-player is the tested focus. Multiplayer and every mod combination have not been validated on this port. Steam platform integration and automatic Workshop downloading are disabled.
 
@@ -110,7 +110,7 @@ These Workshop packs belong directly in `mods/`, with distinct names. Keep the r
 
 ### Copy all downloaded Workshop mods automatically (Windows)
 
-1. Extract the whole tester ZIP on the computer with Steam and Starbound installed, then double-click **Copy All Mods.cmd** beside this README.
+1. Extract the whole release ZIP on the computer with Steam and Starbound installed, then double-click **Copy All Mods.cmd** beside this README.
 2. The helper checks the default Steam installation for downloaded Starbound Workshop packs. If none are found, enter your **Steam folder or Steam library folder**, for example `D:\SteamLibrary`. You can also enter the `211820` folder directly. Enter **Q** to cancel.
 3. Choose the output mods folder. Press **Enter** to use this extracted package's `switch/xstarbound/mods/`, or enter your SD card's mods path, for example `E:\switch\xstarbound\mods`.
 4. The helper copies each available Workshop `packed.pak` as **<workshop_id>.pak** and verifies the copy. If you used the default PC output, copy the package's `switch` folder to the SD card afterward, or transfer the exported mod files over FTP after the game exits.
@@ -129,7 +129,7 @@ This package includes **no third-party gameplay mods**. Test a new installation 
 - When updating, preserve your retail `assets/packed.pak`, `mods/` and `storage/` folders. The supplied storage directory is empty; this package does not contain somebody else's character, settings or universe.
 - Use **Save & Quit**, then exit the game normally before copying saves or retrieving logs.
 
-## If something goes wrong / tester feedback
+## Troubleshooting and feedback
 
 If the game does not start, first check the exact folder layout above, especially both asset-pack locations, then confirm your console runtime matches the prerequisites. For mod-related problems, compare with a clean no-mod launch using a separate test save.
 
