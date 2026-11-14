@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include "StarSwitch2MouseMode.hpp"
 
 namespace Star {
 
@@ -14,6 +15,9 @@ public:
     bool focused = true;
     bool connected = false;
     float leftX = 0, leftY = 0, rightX = 0, rightY = 0;
+    // Native Joy-Con motion in 1280x720 reference pixels, Y positive upwards.
+    bool pointerActive = false;
+    float pointerX = 0, pointerY = 0;
     bool jump = false, pause = false, primary = false, secondary = false, interact = false;
     bool previous = false, next = false;
     bool ability = false, chat = false;
@@ -30,6 +34,7 @@ public:
     bool jump = false, pause = false, primary = false, secondary = false, interact = false;
     bool previousPressed = false, nextPressed = false;
     bool ability = false, alt = false, shift = false, chatPressed = false;
+    bool mouseMode = false;
     float cursorX = 640, cursorY = 360;
   };
 
@@ -97,9 +102,22 @@ public:
     // event mapping. Never release or duplicate a held physical trigger.
     next.primary = next.primary || tapped;
 
+    bool mouseMoving = sample.pointerActive && std::isfinite(sample.pointerX)
+        && std::isfinite(sample.pointerY) && (sample.pointerX != 0 || sample.pointerY != 0);
+    float stickLength = std::hypot(sample.rightX, sample.rightY);
+    next.mouseMode = m_mouseMode.update(sample.connected, sample.focused,
+        mouseMoving && !sample.touching && !tapped, stickLength, seconds);
     if (sample.focused && sample.touching) {
       next.cursorX = std::clamp(sample.touchX, 0.0f, 1.0f) * std::max(width - 1, 0);
       next.cursorY = std::clamp(sample.touchY, 0.0f, 1.0f) * std::max(height - 1, 0);
+    } else if (pad && !tapped && next.mouseMode) {
+      // Keep the stick suppressed during brief sensor gaps. The mode latch
+      // handles deliberate joystick handoff and extended inactivity.
+      if (mouseMoving) {
+        float scale = 0.9f * height / 720.0f;
+        next.cursorX += sample.pointerX * scale;
+        next.cursorY += sample.pointerY * scale;
+      }
     } else if (pad && !tapped) {
       float length = std::hypot(sample.rightX, sample.rightY);
       constexpr float DeadZone = 0.12f;
@@ -126,6 +144,7 @@ public:
     m_state = {}; m_state.cursorX = x; m_state.cursorY = y;
     m_axisLeft = m_axisRight = m_axisUp = m_axisDown = false;
     m_yHeld = false; m_ySeconds = 0;
+    m_mouseMode.pause();
     m_previous = m_next = m_touching = m_tapEligible = false;
   }
 
@@ -136,6 +155,7 @@ private:
     return value >= (held ? 0.25f : 0.35f);
   }
   State m_state;
+  Switch2MouseMode m_mouseMode;
   bool m_previous = false, m_next = false, m_chat = false;
   bool m_axisLeft = false, m_axisRight = false, m_axisUp = false, m_axisDown = false;
   bool m_yHeld = false;

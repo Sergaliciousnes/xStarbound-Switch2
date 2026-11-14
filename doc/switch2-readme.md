@@ -1,4 +1,4 @@
-# xStarbound for Nintendo Switch 2 — Multiplayer Fix
+# xStarbound for Nintendo Switch 2 — Upstream Update & Mouse Mode
 
 ## REQUIRED FIRST: copy packed.pak from your own Steam installation
 
@@ -42,6 +42,7 @@ Mappings below assume the default in-game keyboard bindings.
 | Left stick or D-pad | Move left/right/up; down to crouch |
 | D-pad Down | Crouch and hold Left Shift; left-stick Down does not press Shift |
 | Right stick | Move the cursor (12% radial deadzone; fine center response) |
+| Joy-Con mouse mode | Slide either Joy-Con on a surface to move the cursor |
 | ZR | Left click / primary action; hold to keep pressed |
 | ZL | Right click / secondary action; hold to keep pressed |
 | A | Jump |
@@ -60,6 +61,8 @@ Use the cursor with ZR or a quick touch tap to operate menus and inventory butto
 
 For chat, press **Minus**, enter a message or command, and choose **Done** to send it. Cancel or an empty entry sends nothing. The chat closes afterward. The chat shortcut is available during gameplay. Rebinding the corresponding keyboard actions also changes what these controller mappings do.
 
+Joy-Con mouse mode activates after about **one second of sustained movement**. Brief sensor brushes are ignored. Once active, it stays latched through short pauses. Hold the right stick beyond 25% for 0.4 seconds to return to joystick aiming; mouse mode also expires after 30 seconds without mouse movement. Stick sensitivity and the existing click bindings are unchanged. Touch keeps priority.
+
 ## Multiplayer
 
 Multiplayer has been tested with **xServer 4.7.0.2**, including travel to a planet and the outpost. Use a matching server version and compatible mod files.
@@ -77,7 +80,7 @@ The folder name and location must remain **switch/xstarbound**. The game uses th
 
 ## About this build and source
 
-This is an **unofficial Switch 2 port** based on **xStarbound 4.7.0.2**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
+This is an **unofficial Switch 2 port** based on **xStarbound 4.7.0.3**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
 
 - **Switch 2 port and packaging:** Sergalicious.
 - **Original/upstream xStarbound source:** https://github.com/xStarbound/xStarbound

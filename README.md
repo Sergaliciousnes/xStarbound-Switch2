@@ -7,7 +7,7 @@ This is an unofficial native Horizon port of [xStarbound](https://github.com/xSt
 - **Downloads:** [Switch 2 releases](https://github.com/Sergaliciousnes/xStarbound-Switch2/releases).
 - **Installation, prerequisites, controls and mods:** [player README](doc/switch2-readme.md).
 - **Build from source:** [Switch 2 build instructions](doc/switch2-build.md).
-- **Detailed controls:** [controller mapping](doc/switch2-controls.md).
+- **Detailed controls:** [controller mapping](doc/switch2-controls.md), including native Joy-Con mouse mode.
 
 Multiplayer tested working with **xServer 4.7.0.2**
 

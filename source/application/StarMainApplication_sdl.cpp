@@ -25,6 +25,7 @@
 
 #ifdef __SWITCH2__
 #include "StarSwitch2Controls.hpp"
+#include "StarSwitch2Pointer.hpp"
 #include "StarSwitch2SocketSession.hpp"
 #include <switch.h>
 #include <cstdio>
@@ -299,6 +300,11 @@ public:
     padConfigureInput(1, HidNpadStyleSet_NpadStandard);
     padInitializeDefault(&m_switchPad);
     hidInitializeTouchScreen();
+    Result pointerResult = m_switchPointer.initialize();
+    if (R_SUCCEEDED(pointerResult))
+      Logger::info("Switch 2 Joy-Con mouse: initialized (relative cursor movement)");
+    else
+      Logger::warn("Switch 2 Joy-Con mouse initialization failed: 0x{:08x}; stick and touch cursor remain available", pointerResult);
     // Native HID supplies controller/touch input. Do not also synthesize SDL
     // touch-mouse events or open all eight virtual controller slots.
     SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -428,6 +434,9 @@ public:
     Logger::info("Application: Destroying SDL Window");
     SDL_DestroyWindow(m_sdlWindow);
 
+#ifdef __SWITCH2__
+    m_switchPointer.close();
+#endif
     SDL_Quit();
   }
 
@@ -910,6 +919,7 @@ private:
       padUpdate(&parent->m_switchPad);
       parent->m_switchBlockedButtons = padGetButtons(&parent->m_switchPad);
       parent->m_switchControls.suspend();
+      parent->m_switchPointer.suspend();
       parent->m_switchInputTicks=SDL_GetTicks();
       parent->m_switchFocused=appletGetFocusState()==AppletFocusState_InFocus;
       Logger::info("Switch 2 keyboard: closed, result 0x{:08x}", result);
@@ -985,7 +995,10 @@ private:
       switch (event.type) {
       case SDL_WINDOWEVENT:
 #ifdef __SWITCH2__
-        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) m_switchFocused = false;
+        if (event.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+          m_switchFocused = false;
+          m_switchPointer.suspend();
+        }
         if (event.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) m_switchFocused = true;
 #endif
         if (event.window.event == SDL_WINDOWEVENT_MAXIMIZED || event.window.event == SDL_WINDOWEVENT_RESTORED) {
@@ -1116,6 +1129,11 @@ private:
     Switch2Controls::Sample sample;
     sample.focused = m_switchFocused && appletGetFocusState() == AppletFocusState_InFocus;
     sample.connected = padIsConnected(&m_switchPad);
+    m_switchPointer.update(m_switchPad, sample.focused && sample.connected);
+    sample.pointerActive = m_switchPointer.active();
+    sample.pointerX = static_cast<float>(m_switchPointer.deltaX());
+    // Native pointer Y grows downwards; the game uses a bottom-left origin.
+    sample.pointerY = -static_cast<float>(m_switchPointer.deltaY());
     sample.leftX = left.x / 32768.0f;
     sample.leftY = left.y / 32768.0f;
     sample.rightX = right.x / 32768.0f;
@@ -1306,6 +1324,7 @@ private:
 #ifdef __SWITCH2__
   Vec2U m_windowSize = Switch2RenderSize;
   PadState m_switchPad{};
+  Switch2Pointer m_switchPointer;
   uint64_t m_switchBlockedButtons = 0;
   Switch2Controls m_switchControls;
   Switch2Controls::State m_switchState;

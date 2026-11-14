@@ -7,6 +7,7 @@ Native libounce HID supplies physical Nintendo button names. SDL controller even
 | Left stick or D-pad | WASD movement, up/down/duck |
 | D-pad Down | Also hold Left Shift; left-stick Down does not |
 | Right stick | Cursor movement with 12% radial deadzone and fine center response |
+| Joy-Con mouse mode | Slide either Joy-Con on a surface to move the cursor |
 | ZR | Left mouse button, including hold/drag |
 | ZL | Right mouse button, including hold |
 | Y | E / interact immediately |
@@ -38,3 +39,11 @@ Host tests cover stick/D-pad handoff and diagonals, ability state, Y threshold/A
 5. In a local world press Minus, type a message and select Done. Confirm exactly one message is sent and chat loses focus. Repeat with a harmless command such as /help.
 6. Test Cancel, empty Done, held Minus, and movement/Y held before opening chat. No unintended message or stuck input should remain.
 7. Quit normally and fully close the host title before retrieving logs over FTP.
+
+## Joy-Con mouse mode
+
+Requires a libounce SDK with the native PadPointer/Nmouse helpers and a compatible console runtime. Pointer initialization is optional: failure is logged and stick/touch controls continue working. The installed SDK exposes padPointerInitialize, padPointerUpdate and padPointerExit.
+
+Sliding either Joy-Con moves the existing cursor using relative deltas. The SDK follows the Joy-Con that last moved or changed state. Touch takes priority. Mouse mode arms after about one second of sustained movement, tolerating short sample gaps. Brief brushes do not activate it. Once active, it stays latched through short sensor pauses; hold the right stick beyond 25% for 0.4 seconds to return to joystick aiming, or let mouse movement remain idle for 30 seconds. Joystick aiming is suppressed while mouse mode is latched. The mode is retained across focus/keyboard pauses and resets on controller disconnection. Clicks stay on the existing ZR/ZL and touch-tap mappings; native mouse-button/wheel remapping is not added by this change. Mouse sensitivity is 10% lower than the first mouse build; joystick sensitivity is unchanged. Sensitivity scales from a 1280x720 reference space to preserve screen-relative movement at 1080p. No frame-time multiplier or per-frame service logging is used.
+
+Input samples are consumed while unfocused; queued movement is discarded on returning from HOME or the native keyboard. Pointer resources are released at shutdown, including constructor-failure unwinding. Console validation must check surface movement and Y direction, alternating Joy-Cons, stick/touch handoff, HOME/keyboard return, and normal controls/clicks.
