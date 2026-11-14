@@ -9,9 +9,9 @@ This is an unofficial native Horizon port of [xStarbound](https://github.com/xSt
 - **Build from source:** [Switch 2 build instructions](doc/switch2-build.md).
 - **Detailed controls:** [controller mapping](doc/switch2-controls.md).
 
-Multiplayer tested with **xServer 4.7.0.2**, including travel to planets and the outpost.
+Multiplayer tested working with **xServer 4.7.0.2**
 
-Use a Nintendo Switch 2 with a runtime compatible with **ounce-sdk 20261113 / kaiHEN 0.0.4**, in full-memory title/application mode. This is not a Switch 1 or Linux executable. The SDK and homebrew runtime are separate prerequisites, not bundled with this source tree.
+Simply drop the **switch** folder from the Releases zip on to the **root** of your SD card. Make sure you copied your packed.pak file too!
 
 Original Starbound credit belongs to Chucklefish and its authors; original xStarbound credit belongs to its contributors. The Switch 2 launcher author line identifies the port maintainer. Existing upstream credits and third-party source notices are retained. The original upstream README follows for reference; its desktop download links and features do not imply Switch 2 support for every feature.
 
