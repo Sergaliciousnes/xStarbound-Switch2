@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - devkitPro devkitA64, Switch tools/portlibs and its MSYS2 environment on Windows (or an equivalent Unix devkitPro environment).
-- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Obtain KaiHEN and its SDK from https://github.com/ouncebrew/kaihen/ . Standard devkitPro Switch 1 support alone is insufficient. This release was built against ounce-sdk **20261113**, with libounce db3f88a3, OunceVK 791c34e and OunceHEN 9451c44. The SDK is not vendored here; use the matching/compatible KaiHEN and hbloader on the console.
+- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Grab ounce-devkit from https://github.com/ouncebrew/ounce-devkit . Standard devkitPro Switch 1 support alone is insufficient. This release was built against ounce-sdk **20261113**, with libounce db3f88a3, OunceVK 791c34e and OunceHEN 9451c44. The SDK is not vendored here; use the matching/compatible KaiHEN and hbloader on the console.
 - Host CMake and Ninja, plus host `glslangValidator` on PATH. On Windows the Vulkan SDK's Bin directory is supported through VULKAN_SDK.
 - Switch portlibs including SDL2, zlib, libpng, FreeType, Ogg, Vorbis and Opus and their dependencies. Install with devkitPro pacman. These are target libraries; host Windows/Linux packages are not substitutes.
 - Git, with submodules initialized if using the full upstream desktop source. The Switch 2 client uses installed Opus and disables Tracy.
