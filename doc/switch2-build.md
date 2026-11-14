@@ -38,7 +38,7 @@ STAR_SWITCH2_RENDER_HEIGHT=1080 sh scripts/switch2/build.sh
 
 On Unix, set DEVKITPRO to the actual installation directory, commonly /opt/devkitpro. The script derives the project path from its own location and does not require a copied CMake cache. It uses the project Switch2 toolchain to select libounce and Switch 2 Vulkan libraries and reads the SDK's Cortex-A78C flags.
 
-The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The initial release retains version 4.7.0.2 for the game and launcher; the current Switch 2 port release tag is switch2-v1.0.1.
+The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The current source builds game and launcher version 4.7.0.3. The latest published Switch 2 release remains switch2-v1.0.1 (based on 4.7.0.2).
 
 The script enables the Switch 2 rpmalloc integration, bootstrap bytecode cache and RAM-backed temporary shipworld storage. It disables Steam/Discord integration, desktop allocators, Qt tools, Tracy and heavyweight diagnostic captures. RAM-backed working files do not replace persistent SD saves. Set STAR_SWITCH2_RENDER_HEIGHT=720 to test the alternative render size; analog cursor speed scales with resolution.
 
