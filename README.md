@@ -4,6 +4,8 @@
 
 This is an unofficial native Horizon port of [xStarbound](https://github.com/xStarbound/xStarbound), based on xStarbound 4.7.0.3 / Starbound 1.4.4. It uses Vulkan/OunceVK and libounce. The tested upstream base is `681d20b668385860d5e756b84852a7b9e942c415`.
 
+![xStarbound main menu running on Nintendo Switch 2](doc/images/preview_s2.jpg)
+
 - **Downloads:** [Switch 2 releases](https://github.com/Sergaliciousnes/xStarbound-Switch2/releases).
 - **Installation, prerequisites, controls and mods:** [player README](doc/switch2-readme.md).
 - **Build from source:** [Switch 2 build instructions](doc/switch2-build.md).
