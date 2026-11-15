@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - devkitPro devkitA64, Switch tools/portlibs and its MSYS2 environment on Windows (or an equivalent Unix devkitPro environment).
-- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Grab ounce-devkit from https://github.com/ouncebrew/ounce-devkit . Standard devkitPro Switch 1 support alone is insufficient. This release was built against ounce-sdk **20261113**, with libounce db3f88a3, OunceVK 791c34e and OunceHEN 9451c44. The SDK is not vendored here; use the matching/compatible KaiHEN and hbloader on the console.
+- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Grab ounce-devkit from https://github.com/ouncebrew/ounce-devkit . Standard devkitPro Switch 1 support alone is insufficient. This release was built against ounce-devkit **20261115**, with libounce d1718bb7076f, OunceVK f5afcd27a98d and KaiHEN eb81e1912586. The SDK is not vendored here; use the matching/compatible KaiHEN and hbloader on the console.
 - The installed libounce SDK must include the native **PadPointer/Nmouse** helpers for Joy-Con mouse support (`padPointerInitialize`, `padPointerUpdate`, `padPointerExit`).
 - Host CMake and Ninja, plus host `glslangValidator` on PATH. On Windows the Vulkan SDK's Bin directory is supported through VULKAN_SDK.
 - Switch portlibs including SDL2, zlib, libpng, FreeType, Ogg, Vorbis and Opus and their dependencies. Install with devkitPro pacman. These are target libraries; host Windows/Linux packages are not substitutes.
@@ -17,7 +17,7 @@ In the devkitPro MSYS2 shell on Windows, set DEVKITPRO and run the install.sh su
 export DEVKITPRO=/c/devkitPro
 cd /path/to/kaihen/sdk
 sh install.sh
-cat "$DEVKITPRO/ounce-sdk-version.txt"
+cat "$DEVKITPRO/ounce-devkit-version.txt"
 ```
 
 Replace the example SDK path with the directory containing the install.sh from your KaiHEN source checkout or release package. The installer must place libounce, Switch 2 portlibs and build rules under the same DEVKITPRO directory used for the game build. On Unix, use your actual devkitPro path instead of /c/devkitPro. KaiHEN source: https://github.com/ouncebrew/kaihen/ .
@@ -39,7 +39,7 @@ STAR_SWITCH2_RENDER_HEIGHT=1080 sh scripts/switch2/build.sh
 
 On Unix, set DEVKITPRO to the actual installation directory, commonly /opt/devkitpro. The script derives the project path from its own location and does not require a copied CMake cache. It uses the project Switch2 toolchain to select libounce and Switch 2 Vulkan libraries and reads the SDK's Cortex-A78C flags.
 
-The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The current source builds game and launcher version 4.7.0.3. The current Switch 2 port release tag is switch2-v1.0.2.
+The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The current source builds game and launcher version 4.7.0.3. The current Switch 2 port release tag is switch2-v1.0.3.
 
 The script enables the Switch 2 rpmalloc integration, bootstrap bytecode cache and RAM-backed temporary shipworld storage. It disables Steam/Discord integration, desktop allocators, Qt tools, Tracy and heavyweight diagnostic captures. RAM-backed working files do not replace persistent SD saves. Set STAR_SWITCH2_RENDER_HEIGHT=720 to test the alternative render size; analog cursor speed scales with resolution.
 

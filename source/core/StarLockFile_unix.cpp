@@ -3,6 +3,9 @@
 #include "StarThread.hpp"
 #ifdef STAR_SYSTEM_SWITCH2
 #include "StarLogging.hpp"
+#include "StarFile.hpp"
+#include "StarProcessLock.hpp"
+#include <sys/stat.h>
 #endif
 
 #ifndef STAR_SYSTEM_SWITCH2
@@ -41,17 +44,30 @@ LockFile& LockFile::operator=(LockFile&& lockFile) {
 }
 
 bool LockFile::lock(int64_t timeout) {
-  auto doFLock = [](String const& filename, bool block) -> shared_ptr<int> {
 #ifdef STAR_SYSTEM_SWITCH2
-    // The SD filesystem has no flock. An exclusive sentinel fails closed;
-    // after a crash its stale lock must be removed before reopening storage.
-    int fd = open(filename.utf8Ptr(), O_WRONLY | O_CREAT | O_EXCL, 0644);
-    if (fd < 0) {
-      if (errno == EEXIST) return {};
-      throw StarException::format("Could not create lock file {}: {}", filename, strerror(errno));
+  if (m_handle) return true;
+  auto key = ProcessLock::pathKey(m_filename.utf8(), File::currentDirectory().utf8());
+  auto doFLock = [&key](String const& filename, bool) -> shared_ptr<void> {
+    auto lease = ProcessLock::tryAcquire(key);
+    if (!lease) return {};
+    // Old releases created empty O_EXCL markers. Remove only those legacy
+    // empty regular files, after acquiring the in-process ownership guard.
+    // A leftover marker or cleanup error must not block the next game launch.
+    struct stat info{};
+    if (::stat(filename.utf8Ptr(), &info) == 0 && S_ISREG(info.st_mode) && info.st_size == 0) {
+      int result = ::unlink(filename.utf8Ptr());
+      int error = errno;
+      try {
+        if (result == 0)
+          Logger::info("Removed obsolete SD lock marker '{}'", filename);
+        else if (error != ENOENT)
+          Logger::warn("Could not remove obsolete SD lock marker '{}': {}; using process-local ownership", filename, strerror(error));
+      } catch (...) {}
     }
-    return make_shared<int>(fd);
+    return lease;
+  };
 #else
+  auto doFLock = [](String const& filename, bool block) -> shared_ptr<int> {
     int fd = open(filename.utf8Ptr(), O_RDONLY | O_CREAT, 0644);
     if (fd < 0)
       throw StarException(strf("Could not open lock file {}, {}\n", filename, strerror(errno)));
@@ -70,8 +86,8 @@ bool LockFile::lock(int64_t timeout) {
     }
 
     return make_shared<int>(fd);
-#endif
   };
+#endif
 
   if (timeout < 0) {
 #ifdef STAR_SYSTEM_SWITCH2
@@ -100,27 +116,16 @@ bool LockFile::lock(int64_t timeout) {
 }
 
 void LockFile::unlock() {
+#ifdef STAR_SYSTEM_SWITCH2
+  m_handle.reset();
+#else
   if (m_handle) {
     int fd = *(int*)m_handle.get();
-#ifdef STAR_SYSTEM_SWITCH2
-    // The SD filesystem may reject removal while the file is open.
-    int result = close(fd);
-    int error = errno;
-    if (result == 0) {
-      result = unlink(m_filename.utf8Ptr());
-      error = errno;
-    }
-    if (result < 0 && error != ENOENT) {
-      try {
-        Logger::warn("Could not release SD lock '{}': {}. After the title exits, a stale lock may need removal.", m_filename, strerror(error));
-      } catch (...) {}
-    }
-#else
     unlink(m_filename.utf8Ptr());
     close(fd);
-#endif
     m_handle.reset();
   }
+#endif
 }
 
 bool LockFile::isLocked() const {

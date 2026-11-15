@@ -1,4 +1,4 @@
-# xStarbound for Nintendo Switch 2 — Upstream Update & Mouse Mode
+# xStarbound for Nintendo Switch 2 — SDK Update & Lock Fix
 
 ## REQUIRED FIRST: copy packed.pak from your own Steam installation
 
@@ -70,7 +70,7 @@ Multiplayer has been tested with **xServer 4.7.0.2**, including travel to a plan
 ## Prerequisites and launch
 
 - **Nintendo Switch 2** with [KaiHEN](https://github.com/ouncebrew/kaihen/) installed and a working homebrew menu. This is a native Horizon homebrew NRO; it is not a Switch 1 or Linux executable.
-- A runtime compatible with **ounce-sdk 20261113**. The build was prepared against libounce `db3f88a3`, OunceVK `791c34e` and OunceHEN `9451c44`. Use the matching console-side loader/services or a compatible release.
+- A runtime compatible with **ounce-devkit 20261115**. The build uses libounce `d1718bb7076f`, OunceVK `f5afcd27a98d` and KaiHEN `eb81e1912586`. Use a matching/compatible console runtime.
 - Launch through your homebrew setup's **full-memory application/title mode**. Restricted applet mode is not suitable for this game.
 - Enough free SD-card space for your retail assets, optional mods and growing saves.
 
@@ -149,3 +149,7 @@ Useful logs:
 - **/xstarbound-stderr.log** — runtime/driver errors at the SD root.
 
 Copy logs after the game exits and before launching it again, since a new launch can replace them. This build does not generate the extended performance-capture files used during development. If reporting a loader-cleanup issue, include `/ouncehen/nro-cleanup.txt` and check which program its `program:` line names.
+
+## Closing the software
+
+Closing from HOME no longer leaves a universe.lock marker that blocks the next load. Switch 2 uses an in-memory ownership guard; desktop locking is unchanged. Progress since the last save/autosave can still be lost, so use Save & Quit when possible.
