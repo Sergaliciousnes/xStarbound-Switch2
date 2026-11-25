@@ -2,7 +2,7 @@
 
 **You must own Starbound on Steam to play.** Install the game, open Steam → Starbound → Manage → Browse local files, then copy `assets/packed.pak` from that legitimate installation to `sdmc:/switch/xstarbound/assets/packed.pak`. Retail game assets are not included in this repository or the release package.
 
-This is an unofficial native Horizon port of [xStarbound](https://github.com/xStarbound/xStarbound), based on xStarbound 4.7.0.4 / Starbound 1.4.4. It uses Vulkan/OunceVK and libounce. The upstream base is `092bbbd69082a96104f2c16170e2480a53f35c91`; this update is awaiting its final Switch 2 gameplay test.
+This is an unofficial native Horizon port of [xStarbound](https://github.com/xStarbound/xStarbound), based on xStarbound 4.7.0.4 / Starbound 1.4.4. It uses Vulkan/OunceVK and libounce. The upstream base is `092bbbd69082a96104f2c16170e2480a53f35c91`. This update is **statically linked** and was tested with **KaiHEN 20261117**.
 
 ![xStarbound main menu running on Nintendo Switch 2](doc/images/preview_s2.jpg)
 

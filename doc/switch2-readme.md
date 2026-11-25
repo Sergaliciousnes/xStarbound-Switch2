@@ -70,7 +70,7 @@ Multiplayer has been tested with **xServer 4.7.0.2**, including travel to a plan
 ## Prerequisites and launch
 
 - **Nintendo Switch 2** with [KaiHEN](https://github.com/ouncebrew/kaihen/) installed and a working homebrew menu. This is a native Horizon homebrew NRO; it is not a Switch 1 or Linux executable.
-- Runtime baseline: **KaiHEN 20261117**. The preceding SDK-only build was tested on this version; this upstream candidate still needs its final gameplay test. The SDK runtime and Vulkan are statically bundled, so no shared-library files are required.
+- This update is **statically linked** and was tested with **KaiHEN 20261117** in single-player and multiplayer. The SDK runtime and Vulkan are bundled into the NRO; no shared-library files are required.
 - Launch through your homebrew setup's **full-memory application/title mode**. Restricted applet mode is not suitable for this game.
 - Enough free SD-card space for your retail assets, optional mods and growing saves.
 
