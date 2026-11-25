@@ -1,4 +1,4 @@
-# xStarbound for Nintendo Switch 2 — SDK Update & Lock Fix
+# xStarbound for Nintendo Switch 2 — Upstream Update & SDK Refresh
 
 ## REQUIRED FIRST: copy packed.pak from your own Steam installation
 
@@ -70,7 +70,7 @@ Multiplayer has been tested with **xServer 4.7.0.2**, including travel to a plan
 ## Prerequisites and launch
 
 - **Nintendo Switch 2** with [KaiHEN](https://github.com/ouncebrew/kaihen/) installed and a working homebrew menu. This is a native Horizon homebrew NRO; it is not a Switch 1 or Linux executable.
-- A runtime compatible with **ounce-devkit 20261115**. The build uses libounce `d1718bb7076f`, OunceVK `f5afcd27a98d` and KaiHEN `eb81e1912586`. Use a matching/compatible console runtime.
+- Runtime baseline: **KaiHEN 20261117**. The preceding SDK-only build was tested on this version; this upstream candidate still needs its final gameplay test. The SDK runtime and Vulkan are statically bundled, so no shared-library files are required.
 - Launch through your homebrew setup's **full-memory application/title mode**. Restricted applet mode is not suitable for this game.
 - Enough free SD-card space for your retail assets, optional mods and growing saves.
 
@@ -80,7 +80,7 @@ The folder name and location must remain **switch/xstarbound**. The game uses th
 
 ## About this build and source
 
-This is an **unofficial Switch 2 port** based on **xStarbound 4.7.0.3**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
+This is an **unofficial Switch 2 port** based on **xStarbound 4.7.0.4**, itself a fork of **Starbound 1.4.4**. It is not an official Nintendo or Chucklefish release.
 
 - **Switch 2 port and packaging:** Sergalicious.
 - **Original/upstream xStarbound source:** https://github.com/xStarbound/xStarbound

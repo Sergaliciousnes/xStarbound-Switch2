@@ -3,7 +3,7 @@
 ## Prerequisites
 
 - devkitPro devkitA64, Switch tools/portlibs and its MSYS2 environment on Windows (or an equivalent Unix devkitPro environment).
-- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Grab ounce-devkit from https://github.com/ouncebrew/ounce-devkit . Standard devkitPro Switch 1 support alone is insufficient. This release was built against ounce-devkit **20261115**, with libounce d1718bb7076f, OunceVK f5afcd27a98d and KaiHEN eb81e1912586. The SDK is not vendored here; use the matching/compatible KaiHEN and hbloader on the console.
+- **KaiHEN's Switch 2 SDK must be installed into devkitPro before building.** Grab ounce-devkit from https://github.com/ouncebrew/ounce-devkit . Standard devkitPro Switch 1 support alone is insufficient. The current static candidate uses Pacman packages **libounce 20261125-1**, **ouncevk 20261123.1-1** and **libkaihen 20261123-1**. The SDK-only refresh was tested on **KaiHEN 20261117**; the upstream 4.7.0.4 integration awaits its final console test. The SDK is not vendored here.
 - The installed libounce SDK must include the native **PadPointer/Nmouse** helpers for Joy-Con mouse support (`padPointerInitialize`, `padPointerUpdate`, `padPointerExit`).
 - Host CMake and Ninja, plus host `glslangValidator` on PATH. On Windows the Vulkan SDK's Bin directory is supported through VULKAN_SDK.
 - Switch portlibs including SDL2, zlib, libpng, FreeType, Ogg, Vorbis and Opus and their dependencies. Install with devkitPro pacman. These are target libraries; host Windows/Linux packages are not substitutes.
@@ -39,7 +39,7 @@ STAR_SWITCH2_RENDER_HEIGHT=1080 sh scripts/switch2/build.sh
 
 On Unix, set DEVKITPRO to the actual installation directory, commonly /opt/devkitpro. The script derives the project path from its own location and does not require a copied CMake cache. It uses the project Switch2 toolchain to select libounce and Switch 2 Vulkan libraries and reads the SDK's Cortex-A78C flags.
 
-The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The current source builds game and launcher version 4.7.0.3. The current Switch 2 port release tag is switch2-v1.0.3.
+The default build directory is `build-switch2-clean`. Output is `build-switch2-clean/source/client/xclient.nro`. The launcher title is xStarbound, the author line is Sergalicious, and the existing xStarbound desktop icon is embedded as a JPEG. The current source builds game and launcher version 4.7.0.4. The latest published Switch 2 port release tag remains switch2-v1.0.3 until the candidate is validated.
 
 The script enables the Switch 2 rpmalloc integration, bootstrap bytecode cache and RAM-backed temporary shipworld storage. It disables Steam/Discord integration, desktop allocators, Qt tools, Tracy and heavyweight diagnostic captures. RAM-backed working files do not replace persistent SD saves. Set STAR_SWITCH2_RENDER_HEIGHT=720 to test the alternative render size; analog cursor speed scales with resolution.
 
