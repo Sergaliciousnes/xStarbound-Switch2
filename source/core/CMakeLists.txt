@@ -258,6 +258,11 @@ if(STAR_SYSTEM_SWITCH2 AND STAR_SWITCH2_GAME_RPMALLOC)
     target_sources(star_core PRIVATE StarSwitch2GameAllocator.cpp StarSwitch2RpmallocGameBackend.cpp)
     target_link_libraries(star_core PRIVATE "$<LINK_ONLY:rpmalloc_switch2_candidate>")
     target_link_options(star_core INTERFACE "-Wl,--wrap=free,--wrap=realloc")
+    if(OUNCE_SHARED)
+        # Shared libstdc++ must see the same C++ allocator as the engine.
+        # C malloc/free within SDK libraries stay paired with the SDK allocator.
+        target_link_options(star_core INTERFACE "-Wl,--export-dynamic-symbol=_Zn*,--export-dynamic-symbol=_Zd*")
+    endif()
     set_property(SOURCE StarMemory.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_RPMALLOC)
     if(STAR_SWITCH2_ALLOCATION_PROFILE)
         set_property(SOURCE StarMemory.cpp APPEND PROPERTY COMPILE_DEFINITIONS STAR_SWITCH2_GAME_ALLOC_PROFILE)

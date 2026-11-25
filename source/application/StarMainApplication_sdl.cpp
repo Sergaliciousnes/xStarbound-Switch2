@@ -1369,6 +1369,9 @@ int runMainApplication(ApplicationUPtr application, StringList cmdLineArgs) {
     else
       Logger::warn("Network: Horizon socket initialization failed (Result 0x{:08x}); multiplayer unavailable, single-player remains available", socketSession.result());
     Logger::info("Switch 2: build profile {}", STAR_BUILD_PROFILE);
+#ifdef STAR_SWITCH2_SHARED_RUNTIME
+    Logger::info("Switch 2 SDK linkage: shared libounce/libstdc++/OunceVK (experimental)");
+#endif
 #ifdef STAR_SWITCH2_ALLOCATION_PROFILE
     Logger::info("Switch 2 allocation profiling: enabled (caller timings and SDK heap-lock sampling)");
 #else

@@ -17,7 +17,7 @@ In the devkitPro MSYS2 shell on Windows, set DEVKITPRO and run the install.sh su
 export DEVKITPRO=/c/devkitPro
 cd /path/to/kaihen/sdk
 sh install.sh
-cat "$DEVKITPRO/ounce-devkit-version.txt"
+pacman -Q libounce ouncevk libkaihen
 ```
 
 Replace the example SDK path with the directory containing the install.sh from your KaiHEN source checkout or release package. The installer must place libounce, Switch 2 portlibs and build rules under the same DEVKITPRO directory used for the game build. On Unix, use your actual devkitPro path instead of /c/devkitPro. KaiHEN source: https://github.com/ouncebrew/kaihen/ .
@@ -58,3 +58,34 @@ An NRO build alone does not include game assets. Use the same `sdmc:/switch/xsta
 Cross-compilation sets PACKAGE_XSB_ASSETS=OFF because the target asset_packer cannot run on the build PC. The release package includes the prepacked support assets. To regenerate them, use a host xStarbound asset_packer with scripts/packing.config and the assets/xSBassets directory after CMake has generated its _metadata. Follow the upstream host build instructions for that tool.
 
 The SDK is installed externally; no local modifications to the SDK are needed for the game's rpmalloc integration. It is implemented in the repository's source/extern/rpmalloc-switch2 and ownership-routing source files. The SDK allocator remains available for fallback allocations.
+
+## Experimental shared SDK runtime
+
+Static linking remains the default. To test shared libounce, libstdc++ and
+OunceVK, use libounce 20261123 or newer and a matching KaiHEN loader on the
+console. Use a fresh build directory: changing the TLS model requires rebuilding
+all objects, including the engine and bundled libraries.
+
+```sh
+STAR_SWITCH2_SHARED=ON STAR_SWITCH2_RENDER_HEIGHT=1080 sh scripts/switch2/build.sh
+STAR_SWITCH2_SHARED=ON STAR_SWITCH2_RENDER_HEIGHT=1080 sh scripts/switch2/build.sh xallocator-routing-test_nro
+python scripts/switch2/package-shared-test.py --sdk-root "$DEVKITPRO" --base-release /path/to/current-release.zip
+```
+
+The default experimental build directory is `build-switch2-shared`. CMake users
+can pass `-DOUNCE_SHARED=ON` to the project's Switch2 toolchain. This selects the
+SDK's shared startup, initial-exec TLS and shared-library search paths. The
+engine, Lua, rpmalloc and ordinary portlibs remain static. C++ allocation
+operators are exported so libstdc++ and the game use the game's ownership router;
+C malloc/free inside SDK libraries retain the SDK allocator.
+
+The packaging script creates a separate test ZIP containing the game NRO, the
+matching NRO-format libraries in its own directory, and an allocator diagnostic.
+The optional `--base-release` retains the current release's credits and dependency
+notices. SDL2 also links the SDK's EGL companion library, which is included;
+the game's renderer remains Vulkan.
+The diagnostic tests C/C++ allocation across a shared-library boundary,
+exceptions, worker threads and thread cleanup. Build/link validation alone
+cannot establish that this works on the console. Read the package's test steps
+and retain the current static NRO for rollback. No retail assets or saves are
+included in this overlay package.

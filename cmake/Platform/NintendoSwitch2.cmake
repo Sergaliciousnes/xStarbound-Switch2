@@ -1,6 +1,18 @@
 # Retain the standard devkitPro flags, packaging helpers and tool discovery.
 # NX_ROOT was redirected to libounce by the toolchain before loading this file.
 include_guard(GLOBAL)
+if(OUNCE_SHARED)
+    # Use the SDK's shared startup, library search paths and initial-exec TLS.
+    # The engine and bundled libraries retain their explicit STATIC targets.
+    if(NOT EXISTS "${NX_ROOT}/cmake/Platform/NintendoSwitch.cmake" OR
+       NOT EXISTS "${NX_ROOT}/switch_shared.specs")
+        message(FATAL_ERROR "OUNCE_SHARED requires libounce 20261123 or newer")
+    endif()
+    include("${NX_ROOT}/cmake/Platform/NintendoSwitch.cmake")
+    set(CMAKE_LINK_GROUP_USING_RESCAN "LINKER:--start-group" "LINKER:--end-group")
+    set(CMAKE_LINK_GROUP_USING_RESCAN_SUPPORTED TRUE)
+    return()
+endif()
 include(Platform/NintendoSwitch)
 # Newer libounce provides the native CPU flags. Keep the older SDK usable,
 # but avoid silently retaining Switch 1's A57 tuning in fresh Switch 2 builds.

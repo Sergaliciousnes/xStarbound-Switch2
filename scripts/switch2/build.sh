@@ -4,7 +4,13 @@ set -eu
 : "${DEVKITPRO:?Set DEVKITPRO to your devkitPro installation}"
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
 BUILD_TYPE="${STAR_BUILD_TYPE:-RelWithDebInfo}"
-BUILD_DIR="${STAR_BUILD_DIR:-$PROJECT_DIR/build-switch2-clean}"
+SHARED="${STAR_SWITCH2_SHARED:-OFF}"
+case "$SHARED" in
+    ON) DEFAULT_BUILD_DIR="$PROJECT_DIR/build-switch2-shared" ;;
+    OFF) DEFAULT_BUILD_DIR="$PROJECT_DIR/build-switch2-clean" ;;
+    *) echo "STAR_SWITCH2_SHARED must be ON or OFF" >&2; exit 1 ;;
+esac
+BUILD_DIR="${STAR_BUILD_DIR:-$DEFAULT_BUILD_DIR}"
 export PATH="$DEVKITPRO/tools/bin:$PATH"
 if [ -n "${VULKAN_SDK:-}" ]; then
     SDK_HOST_PATH="$VULKAN_SDK"
@@ -24,6 +30,7 @@ fi
 
 cmake -S "$PROJECT_DIR" -B "$BUILD_DIR" -G Ninja \
     -DCMAKE_TOOLCHAIN_FILE="$PROJECT_DIR/cmake/toolchains/Switch2.cmake" \
+    -DOUNCE_SHARED="$SHARED" -DBUILD_SHARED_LIBS=OFF \
     -DSTAR_GLSLANG_VALIDATOR="$HOST_GLSLANG" \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
     -DSTAR_ENABLE_VULKAN=ON -DSTAR_ENABLE_OPENGL=OFF \

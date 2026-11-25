@@ -7,6 +7,14 @@
 #include <cstring>
 #include <new>
 #include <thread>
+#ifdef STAR_SWITCH2_SHARED_BOUNDARY_TEST
+#include <stdexcept>
+extern "C" void* boundarySdkAllocate();
+extern "C" void boundarySdkFree(void*);
+extern "C" char* boundaryCppAllocate();
+extern "C" void boundaryCppFree(char*);
+extern "C" void boundaryThrow();
+#endif
 #ifdef __SWITCH2__
 #include <switch.h>
 #endif
@@ -34,6 +42,9 @@ std::atomic<unsigned> handlerCalls{0};
 int main(int argc,char** argv){
 #ifdef __SWITCH2__
   (void)argc;(void)argv;reportPath="sdmc:/xstarbound-rpmalloc-routing.log";
+#ifdef STAR_SWITCH2_SHARED_BOUNDARY_TEST
+  reportPath="sdmc:/xstarbound-shared-routing.log";
+#endif
 #else
   reportPath=argc>1?argv[1]:"game-allocator-host.log";
 #endif
@@ -41,6 +52,30 @@ int main(int argc,char** argv){
   bool ok=check(earlyCpp&&earlyC&&!G::owns(earlyCpp)&&!G::owns(earlyC),f,"early SDK ownership");
   ok&=check(G::initialize(64*1024*1024),f,"initialize");if(!ok){std::fclose(f);return 1;}
   ::operator delete(earlyCpp);earlyCpp=nullptr;
+#ifdef STAR_SWITCH2_SHARED_BOUNDARY_TEST
+  auto boundaryCheck=[&]{
+    auto sdk=boundarySdkAllocate();
+    bool passed=sdk&&!G::owns(sdk);
+    __wrap_free(sdk);
+    sdk=std::malloc(256);
+    passed&=sdk&&!G::owns(sdk);
+    boundarySdkFree(sdk);
+    auto cpp=boundaryCppAllocate();
+    passed&=cpp&&G::owns(cpp);
+    delete[] cpp;
+    cpp=new char[256];
+    passed&=G::owns(cpp);
+    boundaryCppFree(cpp);
+    bool caught=false;
+    try{boundaryThrow();}catch(std::runtime_error const& e){caught=std::strlen(e.what())==256;}
+    return passed&&caught;
+  };
+  ok&=check(boundaryCheck(),f,"shared-library C/C++ allocation ownership and exceptions");
+  bool boundaryWorkerOk=false;
+  std::thread boundaryWorker([&]{boundaryWorkerOk=boundaryCheck();});boundaryWorker.join();
+  ok&=check(boundaryWorkerOk,f,"shared-library ownership and exceptions on worker thread");
+  std::fprintf(f,"shared-boundary-tests=%s\n",ok?"verified":"FAILED");
+#endif
   auto resized=static_cast<unsigned char*>(__wrap_realloc(earlyC,8192));ok&=check(resized&&!G::owns(resized),f,"foreign SDK realloc");
   if(resized){for(unsigned i=0;i<91;++i)ok&=resized[i]==0x31;__wrap_free(resized);}else __wrap_free(earlyC);earlyC=nullptr;
   for(size_t n:{size_t(0),size_t(1),size_t(128),size_t(65537),size_t(2097171)}){auto p=::operator new(n);ok&=check(p&&G::owns(p),f,"C++ ownership");::operator delete(p);}
